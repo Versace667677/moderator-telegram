@@ -171,12 +171,116 @@ async def punish_chain(bot, chat_id, user, reason):
             logger.error(f"Ban failed {e}")
             await bot.send_message(chat_id, f"💥 {esc(user.first_name)} мав отримати бан за {esc(reason)} (3/3 варна), але помилка: {e} — перевір чи бот адмін!")
 
+def parse_duration(s):
+    if not s: return 5*60
+    s=str(s).lower().strip()
+    import re
+    m=re.fullmatch(r"(\d+)\s*([smhd])?", s)
+    if not m: return 5*60
+    v=int(m.group(1)); u=m.group(2) or "m"
+    mult={"s":1,"m":60,"h":3600,"d":86400}
+    return v*mult[u]
+
+def format_dur(sec):
+    sec=int(sec)
+    if sec<60: return f"{sec}с"
+    if sec<3600: return f"{sec//60}хв"
+    if sec<86400: return f"{sec//3600}год"
+    return f"{sec//86400}д"
+
 async def cmd_start(message: Message, bot: Bot):
     if message.chat.type=="private":
-        await message.answer("<b>AETHER SIMPLE</b> ✨\n\nЛанцюжок: мут 5хв [1/3][2/3][3/3] → варн [1/3][2/3][3/3] → бан\nВсе в базу, в чат пише хто порушив\n\nКоманди для адміна (відповідь на повідомлення):\n/unmute — зняти мут\n/unban — розбан\n/unwarn — зняти 1 варн\n/clearwarns — очистити варни\n/clearmutes — очистити мути\n/clearall — очистити все\n/warns — подивитись варни\n/stats — статистика\n\nДодай в групу і дай адмінку!")
+        await message.answer("<b>AETHER</b> ✨\n\n<b>Авто:</b> мут 5хв [1/3][2/3][3/3] → варн [1/3][2/3][3/3] → бан\nВсе в базу, в чат пише хто порушив\n\n<b>Адмін-команди (відповідь на юзера):</b>\n/mute 5m причина або !mute 5m — мут\n/ban причина або !ban — бан\n/warn причина або !warn — варн\n/unmute або !unmute — зняти мут\n/unban або !unban — розбан\n/unwarn або !unwarn — зняти варн\n/clearwarns /clearmutes /clearall\n/warns /stats\n\nПідтримує / і ! префікс!\n\nДодай в групу і дай адмінку!")
     else:
         ch=db.get_chat(message.chat.id); ch["title"]=message.chat.title or ""; db.save()
-        await message.answer(f"✨ <b>AETHER SIMPLE</b> активний!\n\nЛанцюжок: мут 5хв [1/3]→[2/3]→[3/3]=варн [1/3]→[2/3]→[3/3]=бан\nВсе зберігається в базу, в чат пише хто порушив\n\nАдмін-команди: /unmute /unban /unwarn /clearwarns /clearmutes /clearall /warns /stats")
+        await message.answer(f"✨ <b>AETHER</b> активний!\n\nАвто: мут 5хв [1/3]→[2/3]→[3/3]=варн→[3/3]=бан\nВсе в базу\n\nАдмін: /mute /ban /warn /unmute /unban /unwarn + з ! теж працює\nПриклад: відповідь на порушника /mute 10m спам або !ban")
+
+# ===== РУЧНІ КОМАНДИ АДМІНА /mute /ban /warn =====
+async def cmd_mute_manual(message: Message, bot: Bot):
+    if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
+    target=message.reply_to_message.from_user if message.reply_to_message and message.reply_to_message.from_user else None
+    if not target: return await message.answer("❌ Відповідай на повідомлення того кого мутиш!\nПриклад: /mute 5m спам або !mute 10m")
+    args=message.text.split()
+    # /mute 5m причина або /mute причина
+    dur=5*60
+    reason="Порушення правил"
+    if len(args)>=2:
+        # Перевіряємо чи другий аргумент це час
+        try:
+            # Спробуємо парсити як час
+            if any(c.isdigit() for c in args[1]):
+                dur=parse_duration(args[1])
+                reason=" ".join(args[2:]) if len(args)>2 else "Порушення правил"
+            else:
+                reason=" ".join(args[1:])
+        except:
+            reason=" ".join(args[1:])
+    try:
+        await bot.restrict_chat_member(message.chat.id, target.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=dur))
+        # Зберігаємо в базу як мут
+        u=db.get_user(message.chat.id, target.id, target.first_name)
+        u["mutes"]=u.get("mutes",0)+1
+        if u["mutes"]>=3:
+            u["mutes"]=0
+            u["warns"]=u.get("warns",0)+1
+        db.save()
+        mutes,warns=db.get_stats(message.chat.id, target.id)
+        await message.answer(f"🔇 <b>Мут видано адміном</b>\n👤 {esc(target.first_name)} | <code>{target.id}</code>\n📛 Причина: {esc(reason)}\n🔇 Покарання: мут {format_dur(dur)}\n🔇 Мути: [{mutes}/3] | ⚠️ Варни: [{warns}/3]\n👮 Адмін: {esc(message.from_user.first_name)}\n💾 Збережено в базу")
+        try: await message.reply_to_message.delete()
+        except: pass
+    except Exception as e: await message.answer(f"❌ Не вдалося: {e}")
+
+async def cmd_ban_manual(message: Message, bot: Bot):
+    if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
+    target=message.reply_to_message.from_user if message.reply_to_message and message.reply_to_message.from_user else None
+    if not target: return await message.answer("❌ Відповідай на повідомлення! Приклад: /ban спам або !ban")
+    reason=message.text.split(maxsplit=1)[1] if len(message.text.split(maxsplit=1))>1 else "Порушення правил"
+    try:
+        await bot.ban_chat_member(message.chat.id, target.id)
+        u=db.get_user(message.chat.id, target.id, target.first_name)
+        u["bans"]=u.get("bans",0)+1
+        u["mutes"]=0; u["warns"]=0
+        db.save()
+        await message.answer(f"🔨 <b>Бан видано адміном</b>\n👤 {esc(target.first_name)} | <code>{target.id}</code>\n📛 Причина: {esc(reason)}\n🔨 Покарання: бан назавжди\n👮 Адмін: {esc(message.from_user.first_name)}\n💾 Збережено в базу (банів: {u['bans']})")
+        try: await message.reply_to_message.delete()
+        except: pass
+    except Exception as e: await message.answer(f"❌ {e}")
+
+async def cmd_warn_manual(message: Message, bot: Bot):
+    if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
+    target=message.reply_to_message.from_user if message.reply_to_message and message.reply_to_message.from_user else None
+    if not target: return await message.answer("❌ Відповідай! Приклад: /warn спам або !warn")
+    reason=message.text.split(maxsplit=1)[1] if len(message.text.split(maxsplit=1))>1 else "Порушення правил"
+    result,mutes,warns=db.add_warn_direct(message.chat.id, target.id, target.first_name) if hasattr(db, 'add_warn_direct') else db.add_mute(message.chat.id, target.id, target.first_name)
+    # Використаємо прямий варн
+    if result!="ban":
+        # Якщо не бан, додаємо варн через add_warn_direct
+        # Перезапишемо логіку: прямий варн
+        u=db.get_user(message.chat.id, target.id, target.first_name)
+        # Вже додали вище, перевіримо
+        if result=="mute":
+            # add_mute додав мут, а нам треба варн - виправимо
+            u["mutes"]=max(0,u.get("mutes",1)-1)
+            u["warns"]=u.get("warns",0)+1
+            db.save()
+            mutes,warns=db.get_stats(message.chat.id, target.id)
+            result="warn"
+    
+    if result=="ban" or warns>=3:
+        try:
+            await bot.ban_chat_member(message.chat.id, target.id)
+            u=db.get_user(message.chat.id, target.id)
+            u["mutes"]=0; u["warns"]=0; db.save()
+            await message.answer(f"💥 <b>Бан за варни</b>\n👤 {esc(target.first_name)} | <code>{target.id}</code>\n📛 Причина: {esc(reason)} — {warns}/3 варна\n🔨 Бан назавжди\n👮 Адмін: {esc(message.from_user.first_name)}")
+        except Exception as e:
+            await message.answer(f"⚠️ {esc(target.first_name)} варн {warns}/3, мав бути бан, але помилка: {e}")
+    else:
+        try:
+            await bot.restrict_chat_member(message.chat.id, target.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(minutes=10))
+            await message.answer(f"⚠️ <b>Варн видано адміном</b>\n👤 {esc(target.first_name)} | <code>{target.id}</code>\n📛 Причина: {esc(reason)}\n⚠️ Варни: [{warns}/3] | 🔇 Мути: [{mutes}/3]\n👮 Адмін: {esc(message.from_user.first_name)}\n💾 Збережено в базу")
+        except:
+            await message.answer(f"⚠️ Варн {warns}/3 видано {esc(target.first_name)} за {esc(reason)}")
+
 
 async def cmd_unmute(message: Message, bot: Bot):
     if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
@@ -317,7 +421,7 @@ async def bot_admin_handler(event: ChatMemberUpdated, bot: Bot):
     if not is_admin_obj(event.new_chat_member): return
     if is_admin_obj(event.old_chat_member): return
     try:
-        await bot.send_message(event.chat.id, f"✨ <b>AETHER SIMPLE</b> активований!\n\n🔇 Мут 5хв [1/3][2/3][3/3] → ⚠️ Варн [1/3][2/3][3/3] → 🔨 Бан\n💾 Все в базу\n🤬 Мат, 🔗 Лінк, 🌊 Флуд, 📢 Спам → авто-покарання\n👋 Вітання/прощання + 🤖 Капча\n\nАдмін-команди:\n/unmute /unban /unwarn /clearwarns /clearmutes /clearall /warns /stats")
+        await bot.send_message(event.chat.id, f"✨ <b>AETHER</b> активований!\n\n🔇 Мут 5хв [1/3][2/3][3/3] → ⚠️ Варн [1/3][2/3][3/3] → 🔨 Бан\n💾 Все в базу\n🤬 Мат, 🔗 Лінк, 🌊 Флуд, 📢 Спам → авто-покарання\n👋 Вітання/прощання + 🤖 Капча\n\nАдмін-команди:\n/unmute /unban /unwarn /clearwarns /clearmutes /clearall /warns /stats")
     except: pass
 
 async def cb_handler(call: CallbackQuery, bot: Bot):
@@ -358,6 +462,14 @@ async def main():
 
     @dp.message(CommandStart())
     async def h_start(m: Message): await cmd_start(m, bot)
+    
+    # Адмін-команди з / префіксом
+    @dp.message(Command("mute"))
+    async def h_mute(m: Message): await cmd_mute_manual(m, bot)
+    @dp.message(Command("ban"))
+    async def h_ban(m: Message): await cmd_ban_manual(m, bot)
+    @dp.message(Command("warn"))
+    async def h_warn(m: Message): await cmd_warn_manual(m, bot)
     @dp.message(Command("unmute"))
     async def h_unmute(m: Message): await cmd_unmute(m, bot)
     @dp.message(Command("unban"))
@@ -376,6 +488,36 @@ async def main():
     async def h_mutes(m: Message): await cmd_warns(m, bot)
     @dp.message(Command("stats"))
     async def h_stats(m: Message): await cmd_stats(m)
+
+    # Адмін-команди з ! префіксом (!ban !mute !warn !unmute !unban !unwarn)
+    @dp.message(F.text.startswith("!"))
+    async def h_bang(m: Message):
+        txt=m.text or ""
+        if not txt.startswith("!"): return
+        cmd=txt.split()[0].lower()
+        # Переписуємо в / формат
+        if cmd in ["!mute"]:
+            await cmd_mute_manual(m, bot)
+        elif cmd in ["!ban"]:
+            await cmd_ban_manual(m, bot)
+        elif cmd in ["!warn"]:
+            await cmd_warn_manual(m, bot)
+        elif cmd in ["!unmute"]:
+            await cmd_unmute(m, bot)
+        elif cmd in ["!unban"]:
+            await cmd_unban(m, bot)
+        elif cmd in ["!unwarn"]:
+            await cmd_unwarn(m, bot)
+        elif cmd in ["!clearwarns"]:
+            await cmd_clearwarns(m, bot)
+        elif cmd in ["!clearmutes"]:
+            await cmd_clearmutes(m, bot)
+        elif cmd in ["!clearall"]:
+            await cmd_clearall(m, bot)
+        elif cmd in ["!warns","!mutes"]:
+            await cmd_warns(m, bot)
+        elif cmd in ["!stats"]:
+            await cmd_stats(m)
 
     @dp.callback_query()
     async def h_cb(c: CallbackQuery): await cb_handler(c, bot)
