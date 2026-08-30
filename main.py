@@ -305,11 +305,12 @@ async def cmd_unmute(message: Message, bot: Bot):
 async def cmd_ban(message: Message, bot: Bot):
     if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
     if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("❌ Відповідай!")
+        return await message.answer("❌ Відповідай на повідомлення порушника!")
     target=message.reply_to_message.from_user
+    reason=message.text.split(maxsplit=1)[1] if len(message.text.split(maxsplit=1))>1 else "Порушення"
     try:
         await bot.ban_chat_member(message.chat.id, target.id)
-        await message.answer(f"🔨 {escape(target.first_name)} забанений ✨")
+        await message.answer(f"🔨 <b>Бан видано</b> ✨\n👤 {escape(target.first_name)} | ID: <code>{target.id}</code>\n📛 Причина: {escape(reason)}\n🔨 Покарання: бан назавжди\n👮 Адмін: {escape(message.from_user.first_name)}")
         try: await message.reply_to_message.delete()
         except: pass
     except Exception as e: await message.answer(f"❌ {e}")
@@ -618,33 +619,67 @@ async def auto_mod(message: Message, bot: Bot):
     except: pass
     ch=db.get_chat(message.chat.id); s=ch["settings"]; text=message.text or message.caption or ""
     uid=str(message.from_user.id)
-    if uid not in ch["users"]: ch["users"][uid]={"warns":0,"messages":0}
+    if uid not in ch["users"]: ch["users"][uid]={"warns":0,"messages":0,"name":message.from_user.first_name}
     ch["users"][uid]["messages"]=ch["users"][uid].get("messages",0)+1
+    ch["users"][uid]["name"]=message.from_user.first_name
+    ch["users"][uid]["last_seen"]=datetime.now().isoformat()
     db.save()
+
+    # === ФЛУД ===
     if s.get("antiflood") and is_flood(message.chat.id, message.from_user.id):
         try: await message.delete()
         except: pass
+        cnt = db.get_warns(message.chat.id, message.from_user.id)
+        if s.get("autowarn"):
+            cnt = db.add_warn(message.chat.id, message.from_user.id)
         if s.get("automute"):
-            try: await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=600))
-            except: pass
+            try:
+                await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=600))
+                await bot.send_message(message.chat.id, f"🌊 <b>Авто-покарання</b> ✨\n👤 {escape(message.from_user.first_name)} | ID: <code>{message.from_user.id}</code>\n📛 Причина: флуд (4 повід. за 5с)\n🔇 Покарання: мут 10хв\n⚠️ Варни: {cnt}/{ch['warn_limit']}", reply_markup=kb_mod(message.chat.id, message.from_user.id))
+            except Exception as e:
+                await bot.send_message(message.chat.id, f"🌊 Флуд від {escape(message.from_user.first_name)} видалено, але мут не вдався: {e}")
         _flood[(message.chat.id, message.from_user.id)]=[]
         return
+
+    # === ЛІНКИ ===
     if s.get("antilink") and contains_link(text):
         try: await message.delete()
         except: pass
-        cnt=db.add_warn(message.chat.id, message.from_user.id) if s.get("autowarn") else 1
+        cnt = db.add_warn(message.chat.id, message.from_user.id) if s.get("autowarn") else db.get_warns(message.chat.id, message.from_user.id)
         if s.get("automute"):
-            try: await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=300))
+            try:
+                await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=300))
+                await bot.send_message(message.chat.id, f"🔗 <b>Авто-покарання</b> ✨\n👤 {escape(message.from_user.first_name)} | ID: <code>{message.from_user.id}</code>\n📛 Причина: лінк / реклама\n🔇 Покарання: мут 5хв + варн\n⚠️ Варни: {cnt}/{ch['warn_limit']}\n📝 Повідомлення видалено", reply_markup=kb_mod(message.chat.id, message.from_user.id))
+            except Exception as e:
+                await bot.send_message(message.chat.id, f"🔗 Лінк від {escape(message.from_user.first_name)} видалено {cnt}/{ch['warn_limit']}")
+        if cnt>=ch["warn_limit"]:
+            try:
+                await bot.ban_chat_member(message.chat.id, message.from_user.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"]))
+                db.clear_warns(message.chat.id, message.from_user.id)
+                await bot.send_message(message.chat.id, f"💥 <b>Авто-бан</b> ✨\n👤 {escape(message.from_user.first_name)} отримав {ch['warn_limit']}/{ch['warn_limit']} варнів і забанений на {format_time(ch['ban_time'])}!")
             except: pass
         return
+
+    # === МАТИ ===
     if s.get("antimat"):
         bad=contains_bad(text, ch.get("banned_words",[]))
         if bad:
             try: await message.delete()
             except: pass
-            db.add_warn(message.chat.id, message.from_user.id)
+            cnt=db.add_warn(message.chat.id, message.from_user.id) if s.get("autowarn") else db.get_warns(message.chat.id, message.from_user.id)
+            if not s.get("autowarn"):
+                cnt=db.add_warn(message.chat.id, message.from_user.id)
             if s.get("automute"):
-                try: await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=ch["mute_time"]))
+                try:
+                    await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=ch["mute_time"]))
+                    await bot.send_message(message.chat.id, f"🤬 <b>Авто-покарання</b> ✨\n👤 {escape(message.from_user.first_name)} | ID: <code>{message.from_user.id}</code>\n📛 Причина: мат (<code>{escape(bad)}</code>)\n🔇 Покарання: мут {format_time(ch['mute_time'])} + варн\n⚠️ Варни: {cnt}/{ch['warn_limit']}\n📝 Повідомлення видалено: <i>{escape(text[:100])}</i>", reply_markup=kb_mod(message.chat.id, message.from_user.id))
+                except Exception as e:
+                    await bot.send_message(message.chat.id, f"🤬 Мат від {escape(message.from_user.first_name)} (<code>{escape(bad)}</code>) видалено, варн {cnt}/{ch['warn_limit']}")
+            if cnt>=ch["warn_limit"]:
+                try:
+                    await bot.ban_chat_member(message.chat.id, message.from_user.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"]))
+                    db.clear_warns(message.chat.id, message.from_user.id)
+                    await bot.send_message(message.chat.id, f"💥 <b>Авто-бан</b> ✨\n👤 {escape(message.from_user.first_name)} | {ch['warn_limit']}/{ch['warn_limit']} варнів за мати! Забанений на {format_time(ch['ban_time'])}!")
                 except: pass
             return
 
@@ -702,6 +737,88 @@ async def main():
     async def h_ban(m: Message): await cmd_ban(m, bot)
     @dp.message(Command("clear"))
     async def h_clear(m: Message): await cmd_clear(m, bot)
+    @dp.message(Command("warns"))
+    async def h_warns(m: Message): 
+        if m.reply_to_message and m.reply_to_message.from_user:
+            target=m.reply_to_message.from_user
+            cnt=db.get_warns(m.chat.id, target.id)
+            await m.answer(f"⚠️ {escape(target.first_name)} — {cnt}/{db.get_chat(m.chat.id)['warn_limit']} варнів", reply_markup=kb_mod(m.chat.id, target.id))
+        else:
+            ch=db.get_chat(m.chat.id)
+            warned=[(uid, u) for uid,u in ch["users"].items() if u.get("warns",0)>0]
+            if not warned:
+                await m.answer("✅ Нема користувачів з варнами ✨")
+            else:
+                txt="<b>⚠️ Список варнів</b> ✨\n\n"
+                for uid,u in sorted(warned, key=lambda x: x[1]["warns"], reverse=True)[:20]:
+                    txt+=f"👤 {escape(u.get('name','Unknown'))} | ID: <code>{uid}</code> — {u['warns']}/{ch['warn_limit']} варнів\n"
+                await m.answer(txt)
+    @dp.message(Command("stats"))
+    async def h_stats(m: Message):
+        ch=db.get_chat(m.chat.id)
+        total_users=len(ch["users"])
+        total_msgs=sum([u.get("messages",0) for u in ch["users"].values()])
+        total_warns=sum([u.get("warns",0) for u in ch["users"].values()])
+        top_active=sorted(ch["users"].items(), key=lambda x: x[1].get("messages",0), reverse=True)[:5]
+        txt=f"<b>📊 Статистика чату {escape(ch.get('title',''))}</b> ✨\n\n👥 Всього юзерів в базі: {total_users}\n💬 Повідомлень: {total_msgs}\n⚠️ Варнів видано: {total_warns}\n🎮 Ігор виграно: {sum(ch.get('games_won',{}).values())}\n\n<b>Топ активних:</b>\n"
+        for i,(uid,u) in enumerate(top_active):
+            txt+=f"{i+1}. {escape(u.get('name','Unknown'))} — {u.get('messages',0)} повід.\n"
+        await m.answer(txt)
+    @dp.message(Command("top"))
+    async def h_top(m: Message):
+        ch=db.get_chat(m.chat.id)
+        top=sorted(ch.get("games_won",{}).items(), key=lambda x: x[1], reverse=True)[:10]
+        if not top:
+            await m.answer("📊 Топ порожній. Зіграй в /game!")
+        else:
+            txt="<b>🏆 Топ гравців</b> ✨\n\n"
+            for i,(uid,wins) in enumerate(top):
+                name=ch["users"].get(uid,{}).get("name", f"ID {uid}")
+                txt+=f"{i+1}. {escape(name)} — {wins} перемог\n"
+            await m.answer(txt)
+    @dp.message(Command("unwarn"))
+    async def h_unwarn(m: Message):
+        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
+        if not m.reply_to_message or not m.reply_to_message.from_user:
+            return await m.answer("❌ Відповідай на повідомлення!")
+        target=m.reply_to_message.from_user
+        new=db.dec_warn(m.chat.id, target.id)
+        await m.answer(f"✅ Знято варн з {escape(target.first_name)}. Тепер {new}/{db.get_chat(m.chat.id)['warn_limit']} ✨", reply_markup=kb_mod(m.chat.id, target.id))
+    @dp.message(Command("clearwarns"))
+    async def h_clearwarns(m: Message):
+        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
+        if not m.reply_to_message or not m.reply_to_message.from_user:
+            return await m.answer("❌ Відповідай!")
+        target=m.reply_to_message.from_user
+        db.clear_warns(m.chat.id, target.id)
+        await m.answer(f"✅ Варни очищені у {escape(target.first_name)} ✨")
+    @dp.message(Command("unban"))
+    async def h_unban2(m: Message):
+        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
+        if not m.reply_to_message or not m.reply_to_message.from_user:
+            return await m.answer("❌ Відповідай!")
+        target=m.reply_to_message.from_user
+        try:
+            await bot.unban_chat_member(m.chat.id, target.id)
+            await m.answer(f"✅ {escape(target.first_name)} розбанений ✨")
+        except Exception as e: await m.answer(f"❌ {e}")
+    @dp.message(Command("warn"))
+    async def h_warn(m: Message):
+        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
+        if not m.reply_to_message or not m.reply_to_message.from_user:
+            return await m.answer("❌ Відповідай!")
+        target=m.reply_to_message.from_user
+        reason=m.text.split(maxsplit=1)[1] if len(m.text.split(maxsplit=1))>1 else "Порушення"
+        cnt=db.add_warn(m.chat.id, target.id)
+        ch=db.get_chat(m.chat.id)
+        await m.answer(f"⚠️ <b>Варн видано</b> ✨\n👤 {escape(target.first_name)} | ID: <code>{target.id}</code>\n📛 Причина: {escape(reason)}\n⚠️ Варни: {cnt}/{ch['warn_limit']}", reply_markup=kb_mod(m.chat.id, target.id))
+        if cnt>=ch["warn_limit"]:
+            try:
+                await bot.ban_chat_member(m.chat.id, target.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"]))
+                db.clear_warns(m.chat.id, target.id)
+                await m.answer(f"💥 Авто-бан {escape(target.first_name)} — {ch['warn_limit']}/{ch['warn_limit']}!")
+            except: pass
+
 
     @dp.callback_query()
     async def h_cb(c: CallbackQuery): await cb_handler(c, bot)
