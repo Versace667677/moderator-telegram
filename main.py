@@ -2,8 +2,8 @@ import os, re, json, asyncio, logging, random, time
 from datetime import datetime, timedelta
 from pathlib import Path
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ChatMemberUpdated, CallbackQuery, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command, CommandStart, ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER
+from aiogram.types import Message, ChatMemberUpdated, CallbackQuery, ChatPermissions
+from aiogram.filters import Command, CommandStart, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, ADMINISTRATOR
 from aiogram.enums import ParseMode, ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
@@ -15,25 +15,23 @@ if not BOT_TOKEN:
     exit(1)
 
 DB_FILE = "database.json"
-
-# Красива база 300 матів (оптимізована)
-BAD_WORDS = ["бля","блять","блядь","сука","сучка","хуй","хуйня","хуйло","пизда","пиздец","єба","ебать","нахуй","похуй","охуел","заебал","долбоёб","уебок","мудак","гандон","пидор","шлюха","жопа","говно","залупа","fuck","shit","bitch","asshole","dick","cunt","whore","slut","bastard","faggot","nigger","retard","motherfucker","bullshit","dickhead","asshat","fuckboy","dumbass","scumbag","shithead","fuckface","assface","dickface","fuckwit","assclown","дебил","дурак","придурок","козел","баран","тварь","мразь","ублюдок","сволочь","гнида","чмо","лох","курва","срака","лайно","гівно","мудила","підар","шмара","довбойоб","уйобок","залупа","єблан","єбало","нахуя","хулі","похуїст","пиздобол","пиздун","пиздюк","єбанутий","їбати","їблан","сраний","засранець","блядіна","курвисько","гондон","підор","педик","гомік","шлюшка","блядун","блядуха","хуесос","хуйовий","хуєта","хуйнути","хуярити","пиздіти","пиздота","пиздюлина","охуєнний","заєбало","уйобище","долбоєб","мудило","срака","сраний"]
+BAD_WORDS = ["бля","блять","блядь","сука","сучка","хуй","хуйня","хуйло","пизда","пиздец","єба","ебать","нахуй","похуй","охуел","заебал","долбоёб","уебок","мудак","гандон","пидор","шлюха","жопа","говно","fuck","shit","bitch","asshole","dick","cunt","whore","slut","bastard","faggot","nigger","motherfucker","дебил","дурак","тварь","мразь","ублюдок","сволочь","гнида","чмо","лох","курва","срака","лайно","мудила","підар","шмара","довбойоб","уйобок","єблан","єбало","нахуя","хулі","пиздобол","єбанутий","сраний","залупа","блядіна","гондон","підор"]
 
 LINK_PATTERNS = [r"t\.me/", r"https?://", r"www\.", r"discord\.gg"]
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("AETHER")
+logger = logging.getLogger("AETHER_V9")
 
 class Database:
     def __init__(self):
         self.data=self._load()
     def _load(self):
         if not Path(DB_FILE).exists():
-            return {"chats":{}}
+            return {"chats":{}, "active_chat": None}
         try:
             with open(DB_FILE,"r",encoding="utf-8") as f:
-                d=json.load(f); d.setdefault("chats",{}); return d
-        except: return {"chats":{}}
+                d=json.load(f); d.setdefault("chats",{}); d.setdefault("active_chat", None); return d
+        except: return {"chats":{}, "active_chat": None}
     def save(self):
         try:
             tmp=DB_FILE+".tmp"
@@ -44,73 +42,45 @@ class Database:
         cid=str(cid)
         if cid not in self.data["chats"]:
             self.data["chats"][cid]={
-                "title":"", 
-                "rules":"1. Без мату та образ\n2. Без спаму та реклами\n3. Поважай інших\n4. Без 18+ контенту",
-                "welcome_text":"Привіт, {name} 👋\nЛаскаво просимо в {chat} ✨\n\nМи раді що ти з нами! Будь активним і дотримуйся правил 🫶",
-                "goodbye_text":"Бувайте, {name} 👋\nСумуватимемо! Повертайся знову 💫",
-                "settings":{"antimat":True,"antilink":True,"antiflood":True,"antispam":True,"welcome":True,"goodbye":True,"captcha":True,"autowarn":True,"automute":True},
-                "users":{},"banned_words":[],"warn_limit":3,"mute_time":600,"ban_time":86400
+                "title":"", "owner_id": None, "is_active": False, "bot_is_admin": False,
+                "rules":"1. Без мату та образ\n2. Без спаму та реклами\n3. Поважай інших\n4. Без 18+",
+                "welcome_text":"Привіт, {name} 👋\nЛаскаво в {chat} ✨\nРаді тебе бачити!",
+                "goodbye_text":"Бувай, {name} 👋 Сумуватимемо!",
+                "settings":{"antimat":True,"antilink":True,"antiflood":True,"welcome":True,"goodbye":True,"captcha":True,"autowarn":True,"automute":True},
+                "users":{},"banned_words":[],"warn_limit":3,"mute_time":600,"ban_time":86400,"members_count":0
             }
             self.save()
         ch=self.data["chats"][cid]
-        ch.setdefault("rules","Правила не встановлені")
-        ch.setdefault("welcome_text","Привіт, {name} 👋")
-        ch.setdefault("goodbye_text","Бувай, {name} 👋")
-        ch.setdefault("settings",{"antimat":True,"antilink":True,"antiflood":True,"antispam":True,"welcome":True,"goodbye":True,"captcha":True,"autowarn":True,"automute":True})
-        for k in ["antimat","antilink","antiflood","antispam","welcome","goodbye","captcha","autowarn","automute"]:
+        ch.setdefault("rules","Правила не встановлені"); ch.setdefault("welcome_text","Привіт, {name} 👋"); ch.setdefault("goodbye_text","Бувай, {name} 👋")
+        ch.setdefault("settings",{"antimat":True,"antilink":True,"antiflood":True,"welcome":True,"goodbye":True,"captcha":True,"autowarn":True,"automute":True})
+        for k in ["antimat","antilink","antiflood","welcome","goodbye","captcha","autowarn","automute"]:
             ch["settings"].setdefault(k, True)
-        ch.setdefault("users",{}); ch.setdefault("banned_words",[]); ch.setdefault("warn_limit",3); ch.setdefault("mute_time",600)
+        ch.setdefault("users",{}); ch.setdefault("banned_words",[]); ch.setdefault("warn_limit",3)
         return ch
-    def get_user(self,cid,uid):
-        ch=self.get_chat(cid); uid=str(uid)
-        if uid not in ch["users"]:
-            ch["users"][uid]={"warns":0,"messages":0}; self.save()
-        return ch["users"][uid]
-    def add_warn(self,cid,uid):
-        u=self.get_user(cid,uid); u["warns"]=min(10,int(u.get("warns",0))+1); self.save(); return u["warns"]
-    def clear_warns(self,cid,uid):
-        u=self.get_user(cid,uid); u["warns"]=0; self.save()
-    def dec_warn(self,cid,uid):
-        u=self.get_user(cid,uid); u["warns"]=max(0,int(u.get("warns",0))-1); self.save(); return u["warns"]
-    def get_warns(self,cid,uid): return int(self.get_user(cid,uid).get("warns",0))
 
 db=Database()
 _flood={}
-_captcha_data={}
+_captcha={}
 
 def escape(t): return str(t or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 def is_admin_obj(m): return m.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR} if m else False
 
-def warn_bar(c): 
-    if c==0: return "○○○"
-    if c==1: return "●○○"
-    if c==2: return "●●○"
-    return "●●●"
-
 def contains_bad(text, extra=[]):
     t=str(text or "").lower()
     for w in BAD_WORDS+extra:
-        if re.search(re.escape(w.lower()), t, re.IGNORECASE):
-            return w
+        if re.search(re.escape(w.lower()), t, re.IGNORECASE): return w
     return None
-
 def contains_link(text):
     for p in LINK_PATTERNS:
         if re.search(p, str(text or ""), re.IGNORECASE): return True
     return False
-
 def is_flood(cid,uid):
     now=time.monotonic(); key=(cid,uid); lst=_flood.get(key,[]); lst=[x for x in lst if now-x<=5]; lst.append(now); _flood[key]=lst; return len(lst)>=4
-
 def parse_time(s):
     if not s: return 600
-    s=str(s).lower().strip()
-    m=re.fullmatch(r"(\d+)\s*([smhd])?", s)
-    if not m: 
-        try: return int(s)*60
-        except: return 600
+    s=str(s).lower().strip(); m=re.fullmatch(r"(\d+)\s*([smhd])?", s)
+    if not m: return 600
     v=int(m.group(1)); u=m.group(2) or "m"; mult={"s":1,"m":60,"h":3600,"d":86400}; return v*mult[u]
-
 def format_time(sec):
     sec=int(sec)
     if sec<60: return f"{sec}с"
@@ -127,382 +97,339 @@ async def is_admin(bot, message):
         return is_admin_obj(member)
     except: return False
 
-# ================= КРАСИВІ КЛАВІАТУРИ =================
-def kb_main():
+# ==================== КЛАВІАТУРИ ====================
+def kb_private_start(bot_username, has_active=False):
     b=InlineKeyboardBuilder()
-    b.button(text="⚙️ Керування", callback_data="panel")
-    b.button(text="🛡️ Модерація", callback_data="mod")
-    b.button(text="✨ AETHER INFO", callback_data="info")
-    b.adjust(2,1)
+    if not has_active:
+        b.button(text="➕ Додати AETHER в чат", url=f"https://t.me/{bot_username}?startgroup=true")
+        b.button(text="📖 Як це працює?", callback_data="how_it_works")
+        b.adjust(1,1)
+    else:
+        # Якщо вже активний - ЛС вимкнено
+        b.button(text="⚙️ Керування вже в групі", callback_data="already_active")
+        b.adjust(1)
     return b.as_markup()
 
-def kb_panel(cid):
+def kb_admin_panel_group(cid):
+    # Панель яка пишеться ТІЛЬКИ в групі для адмінів
+    b=InlineKeyboardBuilder()
+    b.button(text="⚙️ Налаштування", callback_data=f"panel_cfg_{cid}")
+    b.button(text="🛡️ Модерація", callback_data=f"panel_mod_{cid}")
+    b.button(text="🤖 Капча ON/OFF", callback_data=f"tgl_captcha_{cid}")
+    b.button(text="👋 Вітання ON/OFF", callback_data=f"tgl_welcome_{cid}")
+    b.button(text="📜 Правила", callback_data=f"panel_rules_{cid}")
+    b.button(text="🧹 Очистити 20", callback_data=f"quick_clear_20_{cid}")
+    b.button(text="🐢 Тихий режим 10с", callback_data=f"quick_silent_10_{cid}")
+    b.button(text="🐢 Тихий OFF", callback_data=f"quick_silent_0_{cid}")
+    b.adjust(2,2,2,2)
+    return b.as_markup()
+
+def kb_settings_group(cid):
     ch=db.get_chat(cid); s=ch["settings"]
     b=InlineKeyboardBuilder()
-    def ico(v): return "ON" if v else "OFF"
-    b.button(text=f"🤬 Мат {ico(s['antimat'])}", callback_data=f"tgl_antimat_{cid}")
-    b.button(text=f"🔗 Лінки {ico(s['antilink'])}", callback_data=f"tgl_antilink_{cid}")
-    b.button(text=f"🌊 Флуд {ico(s['antiflood'])}", callback_data=f"tgl_antiflood_{cid}")
-    b.button(text=f"👋 Вітання {ico(s['welcome'])}", callback_data=f"tgl_welcome_{cid}")
-    b.button(text=f"👋 Прощання {ico(s['goodbye'])}", callback_data=f"tgl_goodbye_{cid}")
-    b.button(text=f"🤖 Капча {ico(s['captcha'])}", callback_data=f"tgl_captcha_{cid}")
-    b.button(text=f"📜 Правила", callback_data=f"rules_{cid}")
-    b.button(text=f"💬 Вітання", callback_data=f"edit_welcome_{cid}")
-    b.button(text=f"👋 Прощання", callback_data=f"edit_goodbye_{cid}")
-    b.button(text="◀️ Назад", callback_data="main")
-    b.adjust(2,2,2,1,1,1,1)
+    b.button(text=f"🤬 Мат {'ON' if s['antimat'] else 'OFF'}", callback_data=f"tgl_antimat_{cid}")
+    b.button(text=f"🔗 Лінки {'ON' if s['antilink'] else 'OFF'}", callback_data=f"tgl_antilink_{cid}")
+    b.button(text=f"🌊 Флуд {'ON' if s['antiflood'] else 'OFF'}", callback_data=f"tgl_antiflood_{cid}")
+    b.button(text=f"🤖 Капча {'ON' if s['captcha'] else 'OFF'}", callback_data=f"tgl_captcha_{cid}")
+    b.button(text=f"👋 Вітання {'ON' if s['welcome'] else 'OFF'}", callback_data=f"tgl_welcome_{cid}")
+    b.button(text=f"👋 Прощання {'ON' if s['goodbye'] else 'OFF'}", callback_data=f"tgl_goodbye_{cid}")
+    b.button(text="◀️ Назад до панелі", callback_data=f"panel_main_{cid}")
+    b.adjust(2,2,2,1)
     return b.as_markup()
 
-def kb_mod_actions(cid, uid, name):
+def kb_mod_actions(cid, uid):
     b=InlineKeyboardBuilder()
-    b.button(text="🔇 Мут 10хв", callback_data=f"act_mute_600_{cid}_{uid}")
-    b.button(text="🔇 Мут 1год", callback_data=f"act_mute_3600_{cid}_{uid}")
+    b.button(text="🔇 10хв", callback_data=f"act_mute_600_{cid}_{uid}")
+    b.button(text="🔇 1год", callback_data=f"act_mute_3600_{cid}_{uid}")
     b.button(text="⚠️ Варн", callback_data=f"act_warn_{cid}_{uid}")
     b.button(text="🔨 Бан", callback_data=f"act_ban_{cid}_{uid}")
-    b.button(text="✅ Зняти варн", callback_data=f"act_unwarn_{cid}_{uid}")
+    b.button(text="✅ -Варн", callback_data=f"act_unwarn_{cid}_{uid}")
     b.button(text="🔊 Розмут", callback_data=f"act_unmute_{cid}_{uid}")
     b.adjust(2,2,2)
     return b.as_markup()
 
-def kb_captcha_modern(uid, correct_emoji, options):
-    # Сучасна капча - обери правильний емодзі
+def kb_captcha(uid, correct, opts):
     b=InlineKeyboardBuilder()
-    for emoji in options:
-        b.button(text=emoji, callback_data=f"cap_{uid}_{emoji}_{correct_emoji}")
+    for e in opts:
+        b.button(text=e, callback_data=f"cap_{uid}_{e}_{correct}")
     b.adjust(2,2)
     return b.as_markup()
 
-def kb_welcome_verify(uid):
+def kb_verify(uid):
     b=InlineKeyboardBuilder()
-    b.button(text="✅ Я не бот, пропустити", callback_data=f"verify_start_{uid}")
+    b.button(text="✅ Я не бот", callback_data=f"verify_{uid}")
     b.adjust(1)
     return b.as_markup()
 
-# ================= КОМАНДИ =================
+# ==================== КОМАНДИ ====================
 async def cmd_start(message: Message, bot: Bot):
+    bot_info = await bot.get_me()
+    has_active = len(db.data["chats"])>0 and any([c.get("bot_is_admin") for c in db.data["chats"].values()])
+    
     if message.chat.type=="private":
-        txt=f"""<b>AETHER</b> — сучасний захист твого чату
+        if has_active:
+            # ЛС ВИМКНЕНО після додавання в групу
+            active_chat_id = db.data.get("active_chat") or list(db.data["chats"].keys())[0]
+            ch=db.get_chat(active_chat_id)
+            await message.answer(f"<b>AETHER вже активний</b> ✨\n\nЯ працюю тільки в групі <b>{escape(ch.get('title','')}</b>\n\n❌ ЛС вимкнено!\nВсі команди і керування тільки в групі для адмінів.\n\nЯкщо ти адмін — напиши в групі /help",
+                                 reply_markup=kb_private_start(bot_info.username, has_active=True))
+        else:
+            # Перший запуск - тільки кнопка додати в чат
+            txt=f"""<b>AETHER</b> — сучасний захист чату ✨
 
-Привіт, {escape(message.from_user.first_name)} ✨
+<b>Як підключити:</b>
+1️⃣ Натисни <b>Додати AETHER в чат</b>
+2️⃣ Обери свій чат / канал
+3️⃣ Зайди в чат → Адміни → Додай мене адміном з усіма правами
+4️⃣ Як тільки даси адмінку — я сам напишу в чаті панель для адмінів
 
-Я не просто бот-модератор. Я — <b>AETHER</b>, твій невидимий щит.
-
-<b>Що я вмію:</b>
-• Автоматично видаляю мати, лінки, спам і флуд
-• Зустрічаю новачків красивою капчею і вітанням
-• Проводжаю тих хто йде
-• Працюю кнопками, а не скучними командами
-
-<b>Дизайн:</b>
-Мінімалізм, швидкість, без рамок. Як має бути у 2026.
-
-Натисни <b>Керування</b> щоб налаштувати свій чат.
+Після цього я працюватиму тільки в групі. ЛС вимкнеться.
 """
-        await message.answer(txt, reply_markup=kb_main())
+            await message.answer(txt, reply_markup=kb_private_start(bot_info.username, has_active=False))
     else:
+        # В групі
         ch=db.get_chat(message.chat.id); ch["title"]=message.chat.title or ""; db.save()
-        await message.answer(f"<b>AETHER</b> активований в <b>{escape(message.chat.title or 'чаті')}</b> ✨\n\nЯ слідкую за порядком. Матів в базі: {len(BAD_WORDS)}\nНалаштуй мене в ЛС: @{ (await bot.get_me()).username }")
-
-async def cmd_help(message: Message, bot: Bot):
-    # /help тепер показує КРАСИВЕ МЕНЮ З КНОПКАМИ
-    if message.chat.type=="private":
-        txt="""<b>AETHER • Меню допомоги</b> ✨
-
-Привіт! Я — сучасний захисник твого чату.
-
-<b>Що я вмію:</b>
-🤬 Видаляю мати і мутю
-🔗 Видаляю лінки і мутю
-🌊 Захищаю від флуду і спаму
-👋 Зустрічаю новачків капчею
-💫 Проводжаю тих хто йде
-
-<b>Керування — тільки кнопками!</b>
-Натисни нижче щоб налаштувати:
-"""
-        b=InlineKeyboardBuilder()
-        b.button(text="⚙️ Керування чатами", callback_data="panel")
-        b.button(text="🛡️ Авто-модерація", callback_data="mod_info")
-        b.button(text="🤖 Капча і вітання", callback_data="captcha_info")
-        b.button(text="📜 Правила бота", callback_data="bot_rules")
-        b.adjust(1,2,1)
-        await message.answer(txt, reply_markup=b.as_markup())
-    else:
-        # В групі - тільки для адмінів і теж кнопками
-        if not await is_admin(bot,message):
-            return
-        txt=f"""<b>AETHER • Панель керування</b> ✨
+        # Якщо бот ще не адмін - просимо адмінку
+        try:
+            bot_member = await bot.get_chat_member(message.chat.id, bot_info.id)
+            if not is_admin_obj(bot_member):
+                await message.answer(f"👋 Привіт! Я <b>AETHER</b> ✨\n\nЩоб я запрацював, дай мені адмінку:\n\nЧат → Налаштування → Адміністратори → Додати → @{bot_info.username} → ✅ Всі права\n\nПісля цього я сам напишу панель керування для адмінів!")
+                return
+        except: pass
+        
+        # Бот адмін - перевіряємо чи адмін пише
+        if not await is_admin(bot, message):
+            return  # Ігноруємо не адмінів
+        
+        # Адмін в групі - показуємо панель
+        ch["bot_is_admin"]=True; ch["is_active"]=True; db.data["active_chat"]=str(message.chat.id); db.save()
+        txt=f"""<b>AETHER активований</b> ✨
 
 <b>Чат:</b> {escape(message.chat.title or '')}
+<b>ID:</b> <code>{message.chat.id}</code>
 <b>Матів в базі:</b> {len(BAD_WORDS)}
 
-<b>Швидкі дії — натисни кнопку:</b>
+Я постійно оновлюю список учасників і слідкую за порядком.
+Всі команди — тільки для адмінів і тільки кнопками.
+
+<b>Авто-модерація:</b>
+🤬 Мат → видалення + мут + варн
+🔗 Лінк → видалення + мут + варн
+🌊 Флуд → мут
+
+Натисни кнопку щоб керувати:
 """
-        b=InlineKeyboardBuilder()
-        b.button(text="⚙️ Налаштування", callback_data=f"cfg_{message.chat.id}")
-        b.button(text="📜 Правила чату", callback_data=f"rules_{message.chat.id}")
-        b.button(text="🐢 Тихий режим 10с", callback_data=f"quick_silent_10_{message.chat.id}")
-        b.button(text="🐢 Тихий режим OFF", callback_data=f"quick_silent_off_{message.chat.id}")
-        b.button(text="🧹 Очистити 20", callback_data=f"quick_clear_20_{message.chat.id}")
-        b.button(text="❌ Закрити", callback_data="close_help")
-        b.adjust(2,2,1,1)
-        await message.answer(txt, reply_markup=b.as_markup())
+        await message.answer(txt, reply_markup=kb_admin_panel_group(message.chat.id))
+
+async def cmd_help(message: Message, bot: Bot):
+    if message.chat.type=="private":
+        # В ЛС після активації - кажемо що ЛС вимкнено
+        if len(db.data["chats"])>0:
+            return await message.answer("❌ ЛС вимкнено! Керування тільки в групі для адмінів. Напиши /help в групі.")
+        else:
+            bot_info = await bot.get_me()
+            await message.answer("Натисни щоб додати бота в чат:", reply_markup=kb_private_start(bot_info.username))
+        return
+    
+    # В групі - тільки для адмінів
+    if not await is_admin(bot, message):
+        return
+    
+    ch=db.get_chat(message.chat.id)
+    txt=f"""<b>AETHER • Панель адміна</b> ✨
+
+<b>Чат:</b> {escape(message.chat.title or '')}
+<b>Учасників в базі:</b> {len(ch['users'])}
+<b>Матів:</b> {len(BAD_WORDS)}
+
+<b>Керуй кнопками:</b>
+"""
+    await message.answer(txt, reply_markup=kb_admin_panel_group(message.chat.id))
 
 async def cmd_mute(message: Message, bot: Bot):
     if not await is_admin(bot,message): return
     if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("Відповідай на повідомлення того кого треба замутити і напиши /mute 10")
+        return await message.answer("Відповідай на повідомлення порушника!")
     target=message.reply_to_message.from_user
-    try:
-        if await is_admin(bot, message.reply_to_message):
-            return await message.answer("Не можна мутити адміна")
-    except: pass
     sec=parse_time(message.text.split()[1]) if len(message.text.split())>1 else 600
     try:
         await bot.restrict_chat_member(message.chat.id, target.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=sec))
-        await message.answer(f"🔇 <b>{escape(target.first_name)}</b> замучений на {format_time(sec)}", reply_markup=kb_mod_actions(message.chat.id, target.id, target.first_name))
+        await message.answer(f"🔇 {escape(target.first_name)} мут на {format_time(sec)}", reply_markup=kb_mod_actions(message.chat.id, target.id))
         try: await message.reply_to_message.delete()
         except: pass
-    except Exception as e:
-        await message.answer(f"Не вдалося: {e}")
+    except Exception as e: await message.answer(f"❌ {e}")
 
 async def cmd_unmute(message: Message, bot: Bot):
     if not await is_admin(bot,message): return
     if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("Відповідай на повідомлення!")
+        return await message.answer("Відповідай!")
     target=message.reply_to_message.from_user
     try:
         await bot.restrict_chat_member(message.chat.id, target.id, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True))
-        await message.answer(f"🔊 {escape(target.first_name)} розмучений!")
-    except Exception as e: await message.answer(f"Не вдалося: {e}")
+        await message.answer(f"🔊 {escape(target.first_name)} розмучений")
+    except Exception as e: await message.answer(f"❌ {e}")
 
 async def cmd_ban(message: Message, bot: Bot):
     if not await is_admin(bot,message): return
     if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("Відповідай на повідомлення порушника!")
+        return await message.answer("Відповідай!")
     target=message.reply_to_message.from_user
     try:
         await bot.ban_chat_member(message.chat.id, target.id)
         await message.answer(f"🔨 {escape(target.first_name)} забанений")
         try: await message.reply_to_message.delete()
         except: pass
-    except Exception as e: await message.answer(f"Не вдалося: {e}")
-
-async def cmd_unban(message: Message, bot: Bot):
-    if not await is_admin(bot,message): return
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("Відповідай!")
-    target=message.reply_to_message.from_user
-    try:
-        await bot.unban_chat_member(message.chat.id, target.id)
-        await message.answer(f"✅ {escape(target.first_name)} розбанений")
-    except Exception as e: await message.answer(f"Не вдалося: {e}")
-
-async def cmd_warn(message: Message, bot: Bot):
-    if not await is_admin(bot,message): return
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("Відповідай на повідомлення!")
-    target=message.reply_to_message.from_user
-    cnt=db.add_warn(message.chat.id, target.id)
-    ch=db.get_chat(message.chat.id)
-    if cnt>=ch["warn_limit"]:
-        try:
-            await bot.ban_chat_member(message.chat.id, target.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"]))
-            db.clear_warns(message.chat.id, target.id)
-            await message.answer(f"💥 {escape(target.first_name)} отримав {ch['warn_limit']}/{ch['warn_limit']} і забанений!")
-        except: await message.answer(f"{warn_bar(cnt)} {escape(target.first_name)} {cnt}/{ch['warn_limit']}")
-    else:
-        await message.answer(f"⚠️ {warn_bar(cnt)} {escape(target.first_name)} — варн {cnt}/{ch['warn_limit']}", reply_markup=kb_mod_actions(message.chat.id, target.id, target.first_name))
-
-async def cmd_unwarn(message: Message, bot: Bot):
-    if not await is_admin(bot,message): return
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("Відповідай!")
-    target=message.reply_to_message.from_user
-    new=db.dec_warn(message.chat.id, target.id)
-    await message.answer(f"✅ Варн знято. {escape(target.first_name)} — {warn_bar(new)} {new}/3")
+    except Exception as e: await message.answer(f"❌ {e}")
 
 async def cmd_clear(message: Message, bot: Bot):
     if not await is_admin(bot,message): return
     args=message.text.split()
-    try: num=int(args[1]) if len(args)>1 else 10
-    except: num=10
+    try: num=int(args[1]) if len(args)>1 else 20
+    except: num=20
     num=min(max(num,1),100)
     deleted=0
-    # Видаляємо останні повідомлення - шукаємо ID від поточного назад
-    for i in range(num+1):
+    for i in range(num+5):
         try:
             await bot.delete_message(message.chat.id, message.message_id - i)
             deleted+=1
             await asyncio.sleep(0.05)
         except: continue
     try:
-        msg=await message.answer(f"🧹 Видалено {deleted} повідомлень")
+        m=await message.answer(f"🧹 Видалено {deleted} повідомлень ✨")
         await asyncio.sleep(3)
-        try: await msg.delete()
+        try: await m.delete()
         except: pass
     except: pass
 
 async def cmd_silent(message: Message, bot: Bot):
-    if not await is_admin(bot,message): 
-        return await message.answer("❌ Тільки для адмінів!")
+    if not await is_admin(bot,message): return
     args=message.text.split()
-    if len(args)<2 or args[1].lower()=="off" or args[1]=="0": sec=0
+    if len(args)<2 or args[1].lower()=="off": sec=0
     else: sec=parse_time(args[1])
     try:
-        # Правильний метод для aiogram 3.13
         await bot.set_chat_slow_mode_delay(chat_id=message.chat.id, slow_mode_delay=sec)
-        ch=db.get_chat(message.chat.id); ch["slowmode"]=sec; db.save()
         if sec==0: await message.answer("🐢 Тихий режим вимкнено ✨")
-        else: await message.answer(f"🐢 Тихий режим увімкнено: {sec}с між повідомленнями ✨")
-    except Exception as e:
-        await message.answer(f"❌ Не вдалося: {e}\n\nПеревір чи бот адмін з правом 'Змінювати інформацію про групу'!")
+        else: await message.answer(f"🐢 Тихий режим {sec}с ✨")
+    except Exception as e: await message.answer(f"❌ {e}")
 
-async def cmd_rules(message: Message):
-    ch=db.get_chat(message.chat.id)
-    await message.answer(f"<b>Правила {escape(message.chat.title or '')}</b>\n\n{escape(ch['rules'])}")
-
-async def cmd_setrules(message: Message, bot: Bot):
-    if not await is_admin(bot,message): return
-    txt=message.text.split(maxsplit=1)[1] if len(message.text.split(maxsplit=1))>1 else None
-    if not txt: return await message.answer("Напиши: /setrules Текст правил")
-    ch=db.get_chat(message.chat.id); ch["rules"]=txt; db.save()
-    await message.answer("✅ Правила оновлені")
-
-# ================= CALLBACKS =================
+# ==================== CALLBACKS - ТІЛЬКИ ДЛЯ АДМІНІВ ====================
 async def cb_handler(call: CallbackQuery, bot: Bot):
+    # Перевірка - тільки адміни можуть натискати кнопки (крім капчі)
+    if not call.data.startswith("cap_") and not call.data.startswith("verify_"):
+        # В групі перевіряємо адмінку
+        if call.message.chat.type!="private":
+            try:
+                mem=await bot.get_chat_member(call.message.chat.id, call.from_user.id)
+                if not is_admin_obj(mem) and not (call.message.sender_chat and call.message.chat and call.message.sender_chat.id == call.message.chat.id):
+                    # Перевірка анонімного адміна - якщо sender_chat == chat, то адмін
+                    if call.message.chat.type in {"group","supergroup"}:
+                        # Додаткова перевірка для callback від анонімного адміна - дозволяємо якщо юзер адмін в кеші
+                        is_anon=False
+                        # Для спрощення - перевіряємо чи юзер взагалі адмін в цьому чаті через get
+                        try:
+                            m=await bot.get_chat_member(call.message.chat.id, call.from_user.id)
+                            if not is_admin_obj(m):
+                                return await call.answer("❌ Тільки для адмінів!", show_alert=True)
+                        except:
+                            return await call.answer("❌ Тільки для адмінів!", show_alert=True)
+            except:
+                return await call.answer("❌ Тільки для адмінів!", show_alert=True)
+    
     data=call.data
-    uid=call.from_user.id
-
-    if data=="main":
-        await call.message.edit_text("<b>AETHER</b> — сучасний захист\n\nОбери розділ:", reply_markup=kb_main())
+    
+    if data=="how_it_works":
+        await call.message.edit_text("<b>Як працює AETHER:</b>\n\n1️⃣ Додаєш бота в чат кнопкою\n2️⃣ Даєш адмінку\n3️⃣ Бот пише в чаті панель для адмінів\n4️⃣ ЛС вимикається, все в групі\n5️⃣ Не адміни не можуть керувати\n6️⃣ Бот оновлює список учасників", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="back_to_start").as_markup())
         await call.answer(); return
-
-    if data=="panel":
-        # Показати чати
-        chats=list(db.data["chats"].items())[-10:]
-        b=InlineKeyboardBuilder()
-        for cid, ch in reversed(chats):
-            title=ch.get("title") or f"Чат {cid}"
-            b.button(text=title[:30], callback_data=f"cfg_{cid}")
-        b.button(text="◀️ Назад", callback_data="main")
-        b.adjust(1)
-        await call.message.edit_text("<b>AETHER • Твої чати</b>\nОбери чат для керування:", reply_markup=b.as_markup())
+    
+    if data=="back_to_start":
+        bot_info=await bot.get_me()
+        await call.message.edit_text("<b>AETHER</b> — сучасний захист чату ✨\n\nНатисни щоб додати в чат:", reply_markup=kb_private_start(bot_info.username))
         await call.answer(); return
-
-    if data.startswith("cfg_"):
-        cid=int(data.split("_")[1])
-        ch=db.get_chat(cid)
-        txt=f"<b>AETHER • {escape(ch.get('title','') or str(cid))}</b>\nID: <code>{cid}</code>\n\nНалаштуй захист кнопками:"
-        await call.message.edit_text(txt, reply_markup=kb_panel(cid))
-        await call.answer(); return
-
+    
+    if data=="already_active":
+        await call.answer("Я вже працюю в групі! Керування тільки там.", show_alert=True)
+        return
+    
+    if data.startswith("panel_main_") or data.startswith("panel_cfg_") or data.startswith("cfg_") or data.startswith("panel_"):
+        # Панель в групі
+        if "_" in data:
+            parts=data.split("_")
+            cid=int(parts[-1])
+            if data.startswith("panel_cfg_") or data.startswith("cfg_"):
+                await call.message.edit_text(f"<b>AETHER • Налаштування</b>\nID: <code>{cid}</code>", reply_markup=kb_settings_group(cid))
+            elif data.startswith("panel_main_"):
+                ch=db.get_chat(cid)
+                await call.message.edit_text(f"<b>AETHER активований</b> ✨\nЧат: {escape(ch.get('title',''))}", reply_markup=kb_admin_panel_group(cid))
+            elif data.startswith("panel_mod_"):
+                await call.message.edit_text(f"<b>Модерація</b>\nУчасників: {len(db.get_chat(cid)['users'])}\nВарнів: {sum([u['warns'] for u in db.get_chat(cid)['users'].values()])}", reply_markup=kb_admin_panel_group(cid))
+            elif data.startswith("panel_rules_"):
+                ch=db.get_chat(cid)
+                await call.message.edit_text(f"<b>Правила</b>\n\n{escape(ch['rules'])}", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=f"panel_main_{cid}").as_markup())
+            await call.answer(); return
+    
     if data.startswith("tgl_"):
-        parts=data.split("_")
-        key=parts[1]
+        parts=data.split("_"); key=parts[1]
         if len(parts)==4: key=parts[1]+"_"+parts[2]; cid=int(parts[3])
         else: cid=int(parts[2])
         ch=db.get_chat(cid)
         if key in ch["settings"]:
             ch["settings"][key]=not ch["settings"][key]; db.save()
-            await call.answer(f"{key} {'ON' if ch['settings'][key] else 'OFF'}")
-            await call.message.edit_reply_markup(reply_markup=kb_panel(cid))
+            await call.answer(f"{key} {'ON' if ch['settings'][key] else 'OFF'} ✨")
+            await call.message.edit_reply_markup(reply_markup=kb_settings_group(cid) if "panel" in call.message.text or "Налаштування" in call.message.text else kb_admin_panel_group(cid))
         return
-
-    if data=="close_help":
-        try: await call.message.delete()
-        except: await call.message.edit_text("AETHER ✨")
-        await call.answer()
-        return
-
+    
     if data.startswith("quick_silent_"):
-        parts=data.split("_")
-        # quick_silent_10_cid  or quick_silent_off_cid
-        if parts[2]=="off": sec=0
-        else: sec=int(parts[2])
-        cid=int(parts[3])
+        parts=data.split("_"); sec=int(parts[2]); cid=int(parts[3])
         try:
             await bot.set_chat_slow_mode_delay(chat_id=cid, slow_mode_delay=sec)
-            ch=db.get_chat(cid); ch["slowmode"]=sec; db.save()
-            if sec==0: await call.answer("Тихий режим вимкнено ✨")
-            else: await call.answer(f"Тихий режим {sec}с увімкнено ✨")
-            await call.message.edit_text(f"🐢 Тихий режим: {sec}с" if sec>0 else "🐢 Тихий режим вимкнено", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
-        except Exception as e:
-            await call.answer(f"Помилка: {e}", show_alert=True)
+            await call.answer(f"Тихий режим {sec}с" if sec>0 else "Тихий режим OFF")
+        except Exception as e: await call.answer(f"Помилка: {e}", show_alert=True)
         return
-
+    
     if data.startswith("quick_clear_"):
         cid=int(data.split("_")[3]); num=int(data.split("_")[2])
         deleted=0
-        for i in range(num+1):
+        for i in range(num+5):
             try:
                 await bot.delete_message(cid, call.message.message_id - i)
-                deleted+=1
-                await asyncio.sleep(0.05)
+                deleted+=1; await asyncio.sleep(0.05)
             except: continue
-        await call.answer(f"Видалено {deleted} повідомлень")
+        await call.answer(f"Видалено {deleted}")
         return
-
-    if data=="mod_info":
-        await call.message.edit_text("<b>🛡️ Авто-модерація AETHER</b>\n\n🤬 Мат → видалення + мут 10хв + варн\n🔗 Лінки → видалення + мут 5хв + варн\n🌊 Флуд 4 повід/5с → мут 10хв\n📢 Спам → мут\n⚠️ 3 варни → бан\n\nВсе працює автоматично без тебе ✨", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
-        await call.answer(); return
-
-    if data=="captcha_info":
-        await call.message.edit_text("<b>🤖 Капча AETHER</b>\n\nНовачок заходить →\n1. Бот просить натиснути 'Я не бот'\n2. Потім емодзі-капча: обери 🦊\n3. Якщо вірно — вітання ✨\n4. Якщо ні — кікає\n\nКрасиво як на сайтах!", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
-        await call.answer(); return
-
-    if data=="bot_rules":
-        await call.message.edit_text("<b>📜 Правила AETHER</b>\n\nЯ працюю тільки для адмінів.\nЗвичайні юзери не можуть мене викликати.\n\nЯ автоматично захищаю чат від мату, лінків, флуду і спаму.\n\nАдміни керують мною кнопками в ЛС або в групі через /help", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
-        await call.answer(); return
-
-    if data.startswith("rules_"):
-        cid=int(data.split("_")[1])
-        ch=db.get_chat(cid)
-        await call.message.edit_text(f"<b>Правила</b>\n\n{escape(ch['rules'])}", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=f"cfg_{cid}").as_markup())
-        await call.answer(); return
-
+    
     if data.startswith("act_"):
-        # act_mute_600_cid_uid
-        parts=data.split("_")
-        action=parts[1]
+        parts=data.split("_"); action=parts[1]
         if action=="mute":
-            sec=int(parts[2]); cid=int(parts[3]); target_id=int(parts[4])
+            sec=int(parts[2]); cid=int(parts[3]); uid=int(parts[4])
             try:
-                await bot.restrict_chat_member(cid, target_id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=sec))
-                await call.message.edit_text(f"🔇 Замучений на {format_time(sec)}")
-            except Exception as e: await call.answer(f"Помилка: {e}", show_alert=True)
+                await bot.restrict_chat_member(cid, uid, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=sec))
+                await call.message.edit_text(f"🔇 Мут на {format_time(sec)} ✨")
+            except Exception as e: await call.answer(f"{e}", show_alert=True)
         elif action=="warn":
-            cid=int(parts[2]); target_id=int(parts[3])
-            cnt=db.add_warn(cid, target_id)
-            await call.message.edit_text(f"⚠️ Варн {warn_bar(cnt)} {cnt}/3")
+            cid=int(parts[2]); uid=int(parts[3]); cnt=db.add_warn(cid, uid); await call.message.edit_text(f"⚠️ Варн {cnt}/3")
         elif action=="unwarn":
-            cid=int(parts[2]); target_id=int(parts[3])
-            new=db.dec_warn(cid, target_id)
-            await call.message.edit_text(f"✅ Варн знято {warn_bar(new)}")
+            cid=int(parts[2]); uid=int(parts[3]); new=db.dec_warn(cid, uid); await call.message.edit_text(f"✅ Варн знято {new}/3")
         elif action=="ban":
-            cid=int(parts[2]); target_id=int(parts[3])
-            try: await bot.ban_chat_member(cid, target_id); await call.message.edit_text("🔨 Забанений")
-            except Exception as e: await call.answer(f"Помилка: {e}", show_alert=True)
+            cid=int(parts[2]); uid=int(parts[3])
+            try: await bot.ban_chat_member(cid, uid); await call.message.edit_text("🔨 Забанений")
+            except Exception as e: await call.answer(f"{e}", show_alert=True)
         elif action=="unmute":
-            cid=int(parts[2]); target_id=int(parts[3])
-            try: await bot.restrict_chat_member(cid, target_id, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True)); await call.message.edit_text("🔊 Розмучений")
-            except Exception as e: await call.answer(f"Помилка: {e}", show_alert=True)
+            cid=int(parts[2]); uid=int(parts[3])
+            try: await bot.restrict_chat_member(cid, uid, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True)); await call.message.edit_text("🔊 Розмучений ✨")
+            except Exception as e: await call.answer(f"{e}", show_alert=True)
         await call.answer(); return
-
-    if data.startswith("verify_start_"):
-        target_id=int(data.split("_")[2])
-        if call.from_user.id!=target_id:
+    
+    if data.startswith("verify_"):
+        uid=int(data.split("_")[1])
+        if call.from_user.id!=uid:
             return await call.answer("Не твоя капча!", show_alert=True)
-        # Генеруємо сучасну капчу - обери правильний емодзі
-        emojis = ["🦊","🐶","🐱","🐰","🦁","🐯","🐻","🐼"]
-        correct = random.choice(emojis)
-        options = random.sample(emojis, 4)
-        if correct not in options: options[0]=correct
-        random.shuffle(options)
-        _captcha_data[(call.message.chat.id, target_id)] = correct
-        await call.message.edit_text(f"<b>Перевірка AETHER</b>\n\n{escape(call.from_user.first_name)}, доведи що ти не бот ✨\n\nНатисни <b>{correct}</b>", reply_markup=kb_captcha_modern(target_id, correct, options))
+        emojis=["🦊","🐶","🐱","🐰","🦁","🐯"]; correct=random.choice(emojis); opts=random.sample(emojis,4)
+        if correct not in opts: opts[0]=correct
+        random.shuffle(opts)
+        _captcha[(call.message.chat.id, uid)]=correct
+        await call.message.edit_text(f"<b>AETHER • Перевірка</b> ✨\n\n{escape(call.from_user.first_name)}, натисни <b>{correct}</b> щоб довести що ти не бот:", reply_markup=kb_captcha(uid, correct, opts))
         await call.answer(); return
-
+    
     if data.startswith("cap_"):
         _, uid_s, chosen, correct = data.split("_",3)
         uid_s=int(uid_s)
@@ -510,13 +437,17 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
             return await call.answer("Не твоя капча!", show_alert=True)
         key=(call.message.chat.id, uid_s)
         if chosen==correct:
-            _captcha_data.pop(key,None)
+            _captcha.pop(key,None)
             try:
                 await bot.restrict_chat_member(call.message.chat.id, uid_s, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True))
                 ch=db.get_chat(call.message.chat.id)
-                welcome = ch["welcome_text"].format(name=escape(call.from_user.first_name), chat=escape(call.message.chat.title or "чат"))
-                await call.message.edit_text(f"{welcome}\n\n✅ Перевірку пройдено! Ласкаво просимо ✨")
-            except: await call.message.edit_text("✅ Перевірку пройдено!")
+                welcome=ch["welcome_text"].format(name=escape(call.from_user.first_name), chat=escape(call.message.chat.title or "чат"))
+                # Оновлюємо список учасників
+                ch["users"][str(uid_s)]=ch["users"].get(str(uid_s),{"warns":0,"messages":0})
+                ch["members_count"]=len(ch["users"])
+                db.save()
+                await call.message.edit_text(f"{welcome}\n\n✅ Перевірку пройдено ✨")
+            except: await call.message.edit_text("✅ Перевірку пройдено ✨")
             await call.answer("Вітаємо!")
         else:
             try:
@@ -527,9 +458,7 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
             await call.answer("Невірно!", show_alert=True)
         return
 
-    await call.answer()
-
-# ================= АВТО-МОДЕРАЦІЯ + ВИДАЛЕННЯ =================
+# ==================== АВТО-МОДЕРАЦІЯ ====================
 async def auto_mod(message: Message, bot: Bot):
     if not message.from_user or message.from_user.is_bot: return
     if message.chat.type not in {"group","supergroup"}: return
@@ -540,73 +469,111 @@ async def auto_mod(message: Message, bot: Bot):
     except: pass
 
     ch=db.get_chat(message.chat.id); s=ch["settings"]; text=message.text or message.caption or ""
+    # Оновлюємо список учасників постійно
+    uid=str(message.from_user.id)
+    if uid not in ch["users"]:
+        ch["users"][uid]={"warns":0,"messages":0}
+    ch["users"][uid]["messages"]=ch["users"][uid].get("messages",0)+1
+    ch["members_count"]=len(ch["users"])
+    db.save()
 
-    # Флуд
     if s.get("antiflood") and is_flood(message.chat.id, message.from_user.id):
-        try: 
-            await message.delete()
-            logger.info(f"Deleted flood from {message.from_user.id}")
-        except Exception as e: logger.warning(f"Delete flood failed: {e}")
+        try: await message.delete()
+        except: pass
         if s.get("automute"):
             try:
                 await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=600))
-                await bot.send_message(message.chat.id, f"🌊 Авто-мут — {escape(message.from_user.first_name)} флудить, мут 10хв")
+                await bot.send_message(message.chat.id, f"🌊 Авто-мут — {escape(message.from_user.first_name)} флуд, 10хв")
             except: pass
         _flood[(message.chat.id, message.from_user.id)]=[]
         return
 
-    # Лінки
     if s.get("antilink") and contains_link(text):
-        try: await message.delete(); logger.info(f"Deleted link from {message.from_user.id}")
-        except Exception as e: logger.warning(f"Delete link failed: {e}")
+        try: await message.delete()
+        except: pass
         cnt=db.add_warn(message.chat.id, message.from_user.id) if s.get("autowarn") else 1
         if s.get("automute"):
             try:
                 await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=300))
-                await bot.send_message(message.chat.id, f"🔗 Авто-мут — {escape(message.from_user.first_name)} за лінк, мут 5хв {warn_bar(cnt)}")
+                await bot.send_message(message.chat.id, f"🔗 Авто-мут — {escape(message.from_user.first_name)} лінк, 5хв")
             except: pass
         if cnt>=ch["warn_limit"]:
             try: await bot.ban_chat_member(message.chat.id, message.from_user.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"])); db.clear_warns(message.chat.id, message.from_user.id)
             except: pass
         return
 
-    # Мати
     if s.get("antimat"):
         bad=contains_bad(text, ch.get("banned_words",[]))
         if bad:
-            try: await message.delete(); logger.info(f"Deleted bad word {bad} from {message.from_user.id}")
-            except Exception as e: logger.warning(f"Delete bad failed: {e} - bot not admin?")
+            try: await message.delete()
+            except Exception as e: logger.warning(f"Delete failed {e}")
             cnt=db.add_warn(message.chat.id, message.from_user.id) if s.get("autowarn") else 1
             if s.get("automute"):
                 try:
                     await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=ch["mute_time"]))
-                    await bot.send_message(message.chat.id, f"🤬 Авто-мут — {escape(message.from_user.first_name)} за мат, мут {format_time(ch['mute_time'])} {warn_bar(cnt)}")
+                    await bot.send_message(message.chat.id, f"🤬 Авто-мут — {escape(message.from_user.first_name)} мат, {format_time(ch['mute_time'])}")
                 except: pass
             if cnt>=ch["warn_limit"]:
                 try: await bot.ban_chat_member(message.chat.id, message.from_user.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"])); db.clear_warns(message.chat.id, message.from_user.id)
                 except: pass
             return
 
-async def welcome_handler(event: ChatMemberUpdated, bot: Bot):
+# Коли бота роблять адміном - він сам пише панель
+async def bot_admin_handler(event: ChatMemberUpdated, bot: Bot):
+    # Перевіряємо чи бота зробили адміном
+    if event.new_chat_member.user.id != bot.id: return
+    if not is_admin_obj(event.new_chat_member): return
+    if is_admin_obj(event.old_chat_member): return  # Вже був адміном
+    
     ch=db.get_chat(event.chat.id)
-    # Хтось зайшов
-    if event.old_chat_member.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED} and event.new_chat_member.status in {ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED}:
+    ch["bot_is_admin"]=True; ch["is_active"]=True; ch["title"]=event.chat.title or ""; db.data["active_chat"]=str(event.chat.id); db.save()
+    
+    txt=f"""<b>AETHER активований</b> ✨
+
+Вітаю, адміністратори! Я отримав права адміна і готовий захищати чат.
+
+<b>Чат:</b> {escape(event.chat.title or '')}
+<b>ID:</b> <code>{event.chat.id}</code>
+
+<b>Я вмію:</b>
+🤬 Авто-видалення мату + мут
+🔗 Авто-видалення лінків + мут
+🌊 Захист від флуду
+👋 Вітання і прощання
+🤖 Капча для новачків
+
+<b>Керування — тільки для адмінів і тільки тут в групі!</b>
+ЛС тепер вимкнено. Всі кнопки нижче — тільки адміни можуть натискати.
+
+Натисни щоб налаштувати:
+"""
+    try:
+        await bot.send_message(event.chat.id, txt, reply_markup=kb_admin_panel_group(event.chat.id))
+    except Exception as e: logger.warning(f"Send admin panel failed {e}")
+
+async def welcome_handler(event: ChatMemberUpdated, bot: Bot):
+    # Оновлюємо список
+    ch=db.get_chat(event.chat.id)
+    if event.new_chat_member.status in {ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED} and event.old_chat_member.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED}:
         user=event.new_chat_member.user
         if user.is_bot: return
-        if not ch["settings"].get("captcha", True) and not ch["settings"].get("welcome", True): return
+        # Додаємо в базу
+        uid=str(user.id)
+        ch["users"][uid]=ch["users"].get(uid,{"warns":0,"messages":0})
+        ch["members_count"]=len(ch["users"])
+        db.save()
+        
         if ch["settings"].get("captcha", True):
-            # Сучасна капча - спочатку кнопка верифікації
             try:
                 await bot.restrict_chat_member(event.chat.id, user.id, permissions=ChatPermissions(can_send_messages=False))
-                await bot.send_message(event.chat.id, f"Привіт, {escape(user.first_name)} 👋\nЛаскаво просимо в {escape(event.chat.title or 'чат')} ✨\n\nЩоб увійти, пройди перевірку:", reply_markup=kb_welcome_verify(user.id))
-            except Exception as e: logger.warning(f"captcha send failed {e}")
+                await bot.send_message(event.chat.id, f"Привіт, {escape(user.first_name)} 👋\nЛаскаво в {escape(event.chat.title or 'чат')} ✨\n\nПройди перевірку:", reply_markup=kb_verify(user.id))
+            except: pass
         else:
             if ch["settings"].get("welcome", True):
                 try:
                     txt=ch["welcome_text"].format(name=escape(user.first_name), chat=escape(event.chat.title or "чат"))
                     await bot.send_message(event.chat.id, txt)
                 except: pass
-    # Хтось вийшов
     elif event.old_chat_member.status in {ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR} and event.new_chat_member.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED}:
         user=event.old_chat_member.user
         if user.is_bot: return
@@ -615,6 +582,40 @@ async def welcome_handler(event: ChatMemberUpdated, bot: Bot):
                 txt=ch["goodbye_text"].format(name=escape(user.first_name), chat=escape(event.chat.title or "чат"))
                 await bot.send_message(event.chat.id, txt)
             except: pass
+        # Видаляємо з активних? Залишаємо в базі але можна відмітити
+        ch["members_count"]=len([u for u in ch["users"]])  # оновлюємо
+        db.save()
+
+async def check_new_chat_member(message: Message, bot: Bot):
+    # Коли бота додають в чат
+    if bot.id in [u.id for u in message.new_chat_members]:
+        # Хто додав?
+        adder = message.from_user
+        if not adder:
+            return
+        # Перевіряємо чи додав адмін? Якщо чат новий - дозволяємо першому
+        if len(db.data["chats"])==0 or str(message.chat.id) not in db.data["chats"]:
+            # Перший чат - дозволяємо
+            ch=db.get_chat(message.chat.id); ch["owner_id"]=adder.id; ch["title"]=message.chat.title or ""; db.save()
+            await message.answer(f"👋 Привіт! Я <b>AETHER</b> ✨\n\nДякую що додав мене в <b>{escape(message.chat.title or 'чат')}</b>!\n\nЩоб я запрацював:\n1️⃣ Дай мені адмінку з усіма правами\n2️⃣ Я сам напишу панель для адмінів\n\nПісля цього ЛС вимкнеться і все буде тільки в групі.")
+        else:
+            # Вже є активний чат - перевіряємо чи це той самий власник?
+            # Якщо хтось інший хоче додати собі - не дозволяємо
+            existing_owner = None
+            for cid, cdata in db.data["chats"].items():
+                if cdata.get("bot_is_admin"):
+                    existing_owner = cdata.get("owner_id")
+                    break
+            if existing_owner and str(adder.id)!=str(existing_owner):
+                # Чужий хоче додати - бот виходить
+                try:
+                    await message.answer("❌ AETHER вже працює в іншому чаті і налаштований тільки для одного власника. Я не можу працювати в двох чатах одночасно.")
+                    await bot.leave_chat(message.chat.id)
+                except: pass
+                return
+            else:
+                ch=db.get_chat(message.chat.id); ch["title"]=message.chat.title or ""; db.save()
+                await message.answer(f"👋 Привіт! Я <b>AETHER</b> ✨\n\nДай мені адмінку щоб я запрацював!")
 
 async def main():
     bot=Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -631,39 +632,27 @@ async def main():
     async def h_unmute(m: Message): await cmd_unmute(m, bot)
     @dp.message(Command("ban"))
     async def h_ban(m: Message): await cmd_ban(m, bot)
-    @dp.message(Command("unban"))
-    async def h_unban(m: Message): await cmd_unban(m, bot)
-    @dp.message(Command("warn"))
-    async def h_warn(m: Message): await cmd_warn(m, bot)
-    @dp.message(Command("unwarn"))
-    async def h_unwarn(m: Message): await cmd_unwarn(m, bot)
     @dp.message(Command("clear"))
     async def h_clear(m: Message): await cmd_clear(m, bot)
-    @dp.message(Command("purge"))
-    async def h_purge2(m: Message): await cmd_clear(m, bot)
     @dp.message(Command("silent"))
     async def h_silent(m: Message): await cmd_silent(m, bot)
-    @dp.message(Command("rules"))
-    async def h_rules(m: Message): await cmd_rules(m)
-    @dp.message(Command("setrules"))
-    async def h_setrules(m: Message): await cmd_setrules(m, bot)
-    @dp.message(Command("pin"))
-    async def h_pin(m: Message): 
-        if not await is_admin(bot,m): return
-        if not m.reply_to_message: return await m.answer("Відповідай на повідомлення!")
-        try: await bot.pin_chat_message(m.chat.id, m.reply_to_message.message_id); await m.answer("📌 Закріплено")
-        except Exception as e: await m.answer(f"Не вдалося: {e}")
+
+    @dp.message(F.new_chat_members)
+    async def h_new_chat(m: Message): await check_new_chat_member(m, bot)
 
     @dp.callback_query()
     async def h_cb(c: CallbackQuery): await cb_handler(c, bot)
 
-    @dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_MEMBER | IS_NOT_MEMBER))
+    @dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_NOT_MEMBER | IS_MEMBER))
     async def h_join(e: ChatMemberUpdated): await welcome_handler(e, bot)
+
+    @dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=ADMINISTRATOR))
+    async def h_bot_admin(e: ChatMemberUpdated): await bot_admin_handler(e, bot)
 
     @dp.message(F.chat.type.in_({"group","supergroup"}))
     async def h_auto(m: Message): await auto_mod(m, bot)
 
-    logger.info(f"AETHER v8.0 MODERN started! Bad words: {len(BAD_WORDS)}")
+    logger.info("AETHER v9.0 PURE GROUP MODE started!")
     await dp.start_polling(bot)
 
 if __name__=="__main__":
