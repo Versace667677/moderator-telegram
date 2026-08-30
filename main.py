@@ -204,32 +204,49 @@ async def cmd_start(message: Message, bot: Bot):
         await message.answer(f"<b>AETHER</b> активований в <b>{escape(message.chat.title or 'чаті')}</b> ✨\n\nЯ слідкую за порядком. Матів в базі: {len(BAD_WORDS)}\nНалаштуй мене в ЛС: @{ (await bot.get_me()).username }")
 
 async def cmd_help(message: Message, bot: Bot):
-    if message.chat.type!="private" and not await is_admin(bot,message):
-        return
-    await message.answer("""<b>AETHER • Команди</b>
+    # /help тепер показує КРАСИВЕ МЕНЮ З КНОПКАМИ
+    if message.chat.type=="private":
+        txt="""<b>AETHER • Меню допомоги</b> ✨
 
-<b>Кнопками (в ЛС):</b>
-Всі налаштування кнопками, без команд
+Привіт! Я — сучасний захисник твого чату.
 
-<b>В чаті (тільки адміни):</b>
-/mute 10 — мут на 10хв (відповідь на юзера)
-/unmute — розмут
-/ban — бан
-/unban — розбан
-/warn — варн
-/unwarn — зняти варн
-/warns — варни
-/clear 20 — очистити 20 повідомлень
-/silent 10s / off — тихий режим
-/pin — закріпити
-/rules — правила
-/setrules текст — встановити правила
+<b>Що я вмію:</b>
+🤬 Видаляю мати і мутю
+🔗 Видаляю лінки і мутю
+🌊 Захищаю від флуду і спаму
+👋 Зустрічаю новачків капчею
+💫 Проводжаю тих хто йде
 
-<b>Авто:</b>
-Мат → видалення + мут + варн
-Лінк → видалення + мут + варн
-Флуд → мут
-""")
+<b>Керування — тільки кнопками!</b>
+Натисни нижче щоб налаштувати:
+"""
+        b=InlineKeyboardBuilder()
+        b.button(text="⚙️ Керування чатами", callback_data="panel")
+        b.button(text="🛡️ Авто-модерація", callback_data="mod_info")
+        b.button(text="🤖 Капча і вітання", callback_data="captcha_info")
+        b.button(text="📜 Правила бота", callback_data="bot_rules")
+        b.adjust(1,2,1)
+        await message.answer(txt, reply_markup=b.as_markup())
+    else:
+        # В групі - тільки для адмінів і теж кнопками
+        if not await is_admin(bot,message):
+            return
+        txt=f"""<b>AETHER • Панель керування</b> ✨
+
+<b>Чат:</b> {escape(message.chat.title or '')}
+<b>Матів в базі:</b> {len(BAD_WORDS)}
+
+<b>Швидкі дії — натисни кнопку:</b>
+"""
+        b=InlineKeyboardBuilder()
+        b.button(text="⚙️ Налаштування", callback_data=f"cfg_{message.chat.id}")
+        b.button(text="📜 Правила чату", callback_data=f"rules_{message.chat.id}")
+        b.button(text="🐢 Тихий режим 10с", callback_data=f"quick_silent_10_{message.chat.id}")
+        b.button(text="🐢 Тихий режим OFF", callback_data=f"quick_silent_off_{message.chat.id}")
+        b.button(text="🧹 Очистити 20", callback_data=f"quick_clear_20_{message.chat.id}")
+        b.button(text="❌ Закрити", callback_data="close_help")
+        b.adjust(2,2,1,1)
+        await message.answer(txt, reply_markup=b.as_markup())
 
 async def cmd_mute(message: Message, bot: Bot):
     if not await is_admin(bot,message): return
@@ -327,16 +344,19 @@ async def cmd_clear(message: Message, bot: Bot):
     except: pass
 
 async def cmd_silent(message: Message, bot: Bot):
-    if not await is_admin(bot,message): return
+    if not await is_admin(bot,message): 
+        return await message.answer("❌ Тільки для адмінів!")
     args=message.text.split()
-    if len(args)<2 or args[1].lower()=="off": sec=0
+    if len(args)<2 or args[1].lower()=="off" or args[1]=="0": sec=0
     else: sec=parse_time(args[1])
     try:
-        from aiogram.methods import SetChatSlowModeDelay
-        await bot(SetChatSlowModeDelay(chat_id=message.chat.id, slow_mode_delay=sec))
-        if sec==0: await message.answer("Тихий режим вимкнено")
-        else: await message.answer(f"Тихий режим: {sec}с")
-    except Exception as e: await message.answer(f"Не вдалося: {e}")
+        # Правильний метод для aiogram 3.13
+        await bot.set_chat_slow_mode_delay(chat_id=message.chat.id, slow_mode_delay=sec)
+        ch=db.get_chat(message.chat.id); ch["slowmode"]=sec; db.save()
+        if sec==0: await message.answer("🐢 Тихий режим вимкнено ✨")
+        else: await message.answer(f"🐢 Тихий режим увімкнено: {sec}с між повідомленнями ✨")
+    except Exception as e:
+        await message.answer(f"❌ Не вдалося: {e}\n\nПеревір чи бот адмін з правом 'Змінювати інформацію про групу'!")
 
 async def cmd_rules(message: Message):
     ch=db.get_chat(message.chat.id)
@@ -388,6 +408,52 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
             await call.answer(f"{key} {'ON' if ch['settings'][key] else 'OFF'}")
             await call.message.edit_reply_markup(reply_markup=kb_panel(cid))
         return
+
+    if data=="close_help":
+        try: await call.message.delete()
+        except: await call.message.edit_text("AETHER ✨")
+        await call.answer()
+        return
+
+    if data.startswith("quick_silent_"):
+        parts=data.split("_")
+        # quick_silent_10_cid  or quick_silent_off_cid
+        if parts[2]=="off": sec=0
+        else: sec=int(parts[2])
+        cid=int(parts[3])
+        try:
+            await bot.set_chat_slow_mode_delay(chat_id=cid, slow_mode_delay=sec)
+            ch=db.get_chat(cid); ch["slowmode"]=sec; db.save()
+            if sec==0: await call.answer("Тихий режим вимкнено ✨")
+            else: await call.answer(f"Тихий режим {sec}с увімкнено ✨")
+            await call.message.edit_text(f"🐢 Тихий режим: {sec}с" if sec>0 else "🐢 Тихий режим вимкнено", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
+        except Exception as e:
+            await call.answer(f"Помилка: {e}", show_alert=True)
+        return
+
+    if data.startswith("quick_clear_"):
+        cid=int(data.split("_")[3]); num=int(data.split("_")[2])
+        deleted=0
+        for i in range(num+1):
+            try:
+                await bot.delete_message(cid, call.message.message_id - i)
+                deleted+=1
+                await asyncio.sleep(0.05)
+            except: continue
+        await call.answer(f"Видалено {deleted} повідомлень")
+        return
+
+    if data=="mod_info":
+        await call.message.edit_text("<b>🛡️ Авто-модерація AETHER</b>\n\n🤬 Мат → видалення + мут 10хв + варн\n🔗 Лінки → видалення + мут 5хв + варн\n🌊 Флуд 4 повід/5с → мут 10хв\n📢 Спам → мут\n⚠️ 3 варни → бан\n\nВсе працює автоматично без тебе ✨", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
+        await call.answer(); return
+
+    if data=="captcha_info":
+        await call.message.edit_text("<b>🤖 Капча AETHER</b>\n\nНовачок заходить →\n1. Бот просить натиснути 'Я не бот'\n2. Потім емодзі-капча: обери 🦊\n3. Якщо вірно — вітання ✨\n4. Якщо ні — кікає\n\nКрасиво як на сайтах!", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
+        await call.answer(); return
+
+    if data=="bot_rules":
+        await call.message.edit_text("<b>📜 Правила AETHER</b>\n\nЯ працюю тільки для адмінів.\nЗвичайні юзери не можуть мене викликати.\n\nЯ автоматично захищаю чат від мату, лінків, флуду і спаму.\n\nАдміни керують мною кнопками в ЛС або в групі через /help", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="main").as_markup())
+        await call.answer(); return
 
     if data.startswith("rules_"):
         cid=int(data.split("_")[1])
