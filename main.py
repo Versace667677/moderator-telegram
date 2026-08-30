@@ -3,27 +3,27 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ChatMemberUpdated, CallbackQuery, ChatPermissions
-from aiogram.filters import Command, CommandStart, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, ADMINISTRATOR
-from aiogram.enums import ParseMode, ChatMemberStatus
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.filters import CommandStart, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, ADMINISTRATOR
+from aiogram.enums import ChatMemberStatus
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("❌ BOT_TOKEN not found!")
+    print("❌ BOT_TOKEN missing!")
     exit(1)
 
 DB_FILE = "database.json"
 
-BAD_WORDS = ["бля","блять","блядь","сука","сучка","хуй","хуйня","хуйло","пизда","пиздец","єба","ебать","нахуй","похуй","охуел","заебал","долбоёб","уебок","мудак","гандон","пидор","шлюха","жопа","говно","fuck","shit","bitch","asshole","dick","cunt","whore","slut","bastard","faggot","nigger","motherfucker","дебил","дурак","тварь","мразь","ублюдок","сволочь","гнида","чмо","лох","курва","срака","лайно","мудила","підар","шмара","довбойоб","уйобок","єблан","єбало","нахуя","хулі","пиздобол","єбанутий","сраний","залупа","блядіна","гондон","підор","хуесос","хуйовий","пиздун","пиздюк","охуєнний","заєбало","уйобище","мудило"]
+BAD_WORDS = ["бля","блять","блядь","сука","сучка","хуй","хуйня","хуйло","пизда","пиздец","єба","ебать","нахуй","похуй","охуел","заебал","долбоёб","уебок","мудак","гандон","пидор","шлюха","жопа","говно","fuck","shit","bitch","asshole","dick","cunt","whore","slut","bastard","faggot","nigger","motherfucker","дебил","дурак","тварь","мразь","ублюдок","сволочь","гнида","чмо","лох","курва","срака","лайно","мудила","підар","шмара","довбойоб","уйобок","єблан","єбало","нахуя","хулі","пиздобол","єбанутий","сраний","залупа"]
 
 LINK_PATTERNS = [r"t\.me/", r"https?://", r"www\.", r"discord\.gg"]
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("AETHER_V11")
+logger = logging.getLogger("AETHER_SIMPLE")
 
-class Database:
+class DB:
     def __init__(self):
         self.data=self._load()
     def _load(self):
@@ -42,47 +42,44 @@ class Database:
     def get_chat(self,cid):
         cid=str(cid)
         if cid not in self.data["chats"]:
-            self.data["chats"][cid]={
-                "title":"", "bot_is_admin": False,
-                "rules":"1️⃣ Без мату та образ\n2️⃣ Без спаму, реклами, лінків\n3️⃣ Поважай інших\n4️⃣ Без 18+",
-                "welcome_text":"Привіт, {name} 👋\n✨ Ласкаво в {chat} ✨\n💫 Ми раді що ти з нами!",
-                "goodbye_text":"Бувай, {name} 👋 Сумуватимемо!",
-                "settings":{"antimat":True,"antilink":True,"antiflood":True,"antispam":True,"welcome":True,"goodbye":True,"captcha":True,"autowarn":True,"automute":True},
-                "users":{},"banned_words":[],"warn_limit":3,"mute_time":600,"ban_time":86400,
-                "games_won":{}
-            }
+            self.data["chats"][cid]={"title":"", "users":{}}
             self.save()
         ch=self.data["chats"][cid]
-        ch.setdefault("rules","Правила не встановлені"); ch.setdefault("welcome_text","Привіт, {name} 👋"); ch.setdefault("goodbye_text","Бувай, {name} 👋")
-        ch.setdefault("settings",{"antimat":True,"antilink":True,"antiflood":True,"antispam":True,"welcome":True,"goodbye":True,"captcha":True,"autowarn":True,"automute":True})
-        for k in ["antimat","antilink","antiflood","antispam","welcome","goodbye","captcha","autowarn","automute"]:
-            ch["settings"].setdefault(k, True)
-        ch.setdefault("users",{}); ch.setdefault("banned_words",[]); ch.setdefault("warn_limit",3); ch.setdefault("games_won",{})
+        ch.setdefault("users",{})
         return ch
-    def get_user(self,cid,uid):
+    def get_user(self,cid,uid, name=""):
         ch=self.get_chat(cid); uid=str(uid)
         if uid not in ch["users"]:
-            ch["users"][uid]={"warns":0,"messages":0}; self.save()
-        return ch["users"][uid]
-    def add_warn(self,cid,uid):
-        u=self.get_user(cid,uid); u["warns"]=min(10,int(u.get("warns",0))+1); self.save(); return u["warns"]
-    def dec_warn(self,cid,uid):
-        u=self.get_user(cid,uid); u["warns"]=max(0,int(u.get("warns",0))-1); self.save(); return u["warns"]
-    def get_warns(self,cid,uid): return int(self.get_user(cid,uid).get("warns",0))
-    def clear_warns(self,cid,uid):
-        u=self.get_user(cid,uid); u["warns"]=0; self.save()
+            ch["users"][uid]={"name":name,"mutes":0,"warns":0,"messages":0}
+            self.save()
+        u=ch["users"][uid]
+        if name: u["name"]=name
+        u.setdefault("mutes",0); u.setdefault("warns",0); u.setdefault("messages",0)
+        return u
+    def add_mute(self,cid,uid,name=""):
+        u=self.get_user(cid,uid,name)
+        u["mutes"]+=1
+        # 3/3 мута -> 1 варн
+        if u["mutes"]>=3:
+            u["mutes"]=0
+            u["warns"]+=1
+            self.save()
+            return "warn", u["warns"], u["mutes"]
+        self.save()
+        return "mute", u["warns"], u["mutes"]
+    def get_stats(self,cid,uid):
+        u=self.get_user(cid,uid)
+        return u["mutes"], u["warns"]
 
-db=Database()
+db=DB()
 _flood={}
 _captcha={}
-_games={}  # game_id -> {board, players, turn, chat_id, message_id}
-_game_counter=0
 
-def escape(t): return str(t or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+def esc(t): return str(t or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 def is_admin_obj(m): return m.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR} if m else False
-def contains_bad(text, extra=[]):
+def contains_bad(text):
     t=str(text or "").lower()
-    for w in BAD_WORDS+extra:
+    for w in BAD_WORDS:
         if re.search(re.escape(w.lower()), t, re.IGNORECASE): return w
     return None
 def contains_link(text):
@@ -91,105 +88,27 @@ def contains_link(text):
     return False
 def is_flood(cid,uid):
     now=time.monotonic(); key=(cid,uid); lst=_flood.get(key,[]); lst=[x for x in lst if now-x<=5]; lst.append(now); _flood[key]=lst; return len(lst)>=4
-def parse_time(s):
-    if not s: return 600
-    s=str(s).lower().strip(); m=re.fullmatch(r"(\d+)\s*([smhd])?", s)
-    if not m: return 600
-    v=int(m.group(1)); u=m.group(2) or "m"; mult={"s":1,"m":60,"h":3600,"d":86400}; return v*mult[u]
-def format_time(sec):
-    sec=int(sec)
-    if sec<60: return f"{sec}с"
-    if sec<3600: return f"{sec//60}хв"
-    if sec<86400: return f"{sec//3600}год"
-    return f"{sec//86400}д"
+def is_spam(text):
+    if not text: return False
+    if len(text)>800: return "довге повідомлення"
+    if re.search(r"(.)\1{7,}", text): return "спам символами"
+    if len(text)>15 and sum(1 for c in text if c.isupper())/len(text)>0.8: return "капс"
+    emoji_count=len(re.findall(r"[😀-🙏🌀-🗿🚀-🛿]", text))
+    if emoji_count>12: return "багато емодзі"
+    return False
 
-async def is_admin(bot, message):
-    if message.sender_chat and message.chat and message.sender_chat.id == message.chat.id:
-        return True
-    if not message.from_user: return False
+async def is_admin(bot, msg):
+    if msg.sender_chat and msg.chat and msg.sender_chat.id==msg.chat.id: return True
+    if not msg.from_user: return False
     try:
-        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-        return is_admin_obj(member)
+        m=await bot.get_chat_member(msg.chat.id, msg.from_user.id)
+        return is_admin_obj(m)
     except: return False
 
-# ==================== ГРА ХРЕСТИКИ-НОЛИКИ ====================
-def check_winner(board):
-    # board 9 елементів: 0-8
-    wins = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
-    for a,b,c in wins:
-        if board[a] and board[a]==board[b]==board[c]:
-            return board[a]
-    if all(board): return "draw"
-    return None
-
-def render_board(board):
-    # board: ["", "X", "O"...]
-    symbols = {"": "⬜", "X": "❌", "O": "⭕"}
-    lines=[]
-    for i in range(0,9,3):
-        lines.append(f"{symbols.get(board[i],'⬜')}{symbols.get(board[i+1],'⬜')}{symbols.get(board[i+2],'⬜')}")
-    return "\n".join(lines)
-
-def kb_tictactoe(game_id, board):
+# ==================== КАПЧА ====================
+def kb_verify(uid):
     b=InlineKeyboardBuilder()
-    for i in range(9):
-        if board[i]=="":
-            b.button(text="⬜", callback_data=f"ttt_move_{game_id}_{i}")
-        else:
-            txt="❌" if board[i]=="X" else "⭕"
-            b.button(text=txt, callback_data=f"ttt_ignore_{game_id}")
-    b.button(text="🚪 Вийти з гри", callback_data=f"ttt_leave_{game_id}")
-    b.adjust(3,3,3,1)  # ФІКС: 3x3 поле + кнопка виходу
-    return b.as_markup()
-
-def kb_game_lobby():
-    b=InlineKeyboardBuilder()
-    b.button(text="🎮 Створити гру (2 гравці)", callback_data="ttt_create")
-    b.button(text="📊 Топ гравців", callback_data="ttt_top")
-    b.adjust(1,1)
-    return b.as_markup()
-
-# ==================== КЛАВІАТУРИ ====================
-def kb_private(bot_username):
-    b=InlineKeyboardBuilder()
-    b.button(text="➕ Додати AETHER в чат", url=f"https://t.me/{bot_username}?startgroup=true")
-    b.button(text="📖 Що вміє?", callback_data="about")
-    b.button(text="🎮 Гра в чаті", callback_data="about_game")
-    b.adjust(1,1,1)
-    return b.as_markup()
-
-def kb_group_main(cid):
-    b=InlineKeyboardBuilder()
-    b.button(text="⚙️ Налаштування", callback_data=f"cfg_{cid}")
-    b.button(text="🎮 Гра Хрестики-Нолики", callback_data=f"game_{cid}")
-    b.button(text="🤖 Капча", callback_data=f"tgl_captcha_{cid}")
-    b.button(text="👋 Вітання", callback_data=f"tgl_welcome_{cid}")
-    b.button(text="📜 Правила", callback_data=f"rules_{cid}")
-    b.button(text="🧹 Clear 20", callback_data=f"clear_20_{cid}")
-    b.adjust(2,2,2,1)
-    return b.as_markup()
-
-def kb_settings(cid):
-    ch=db.get_chat(cid); s=ch["settings"]
-    def st(v): return "🟢 ON" if v else "🔴 OFF"
-    b=InlineKeyboardBuilder()
-    b.button(text=f"🤬 Мат {st(s['antimat'])}", callback_data=f"tgl_antimat_{cid}")
-    b.button(text=f"🔗 Лінки {st(s['antilink'])}", callback_data=f"tgl_antilink_{cid}")
-    b.button(text=f"🌊 Флуд {st(s['antiflood'])}", callback_data=f"tgl_antiflood_{cid}")
-    b.button(text=f"🤖 Капча {st(s['captcha'])}", callback_data=f"tgl_captcha_{cid}")
-    b.button(text=f"👋 Вітання {st(s['welcome'])}", callback_data=f"tgl_welcome_{cid}")
-    b.button(text="◀️ Назад", callback_data=f"main_{cid}")
-    b.adjust(2,2,2,1)
-    return b.as_markup()
-
-def kb_mod(cid, uid):
-    b=InlineKeyboardBuilder()
-    b.button(text="🔇 10хв", callback_data=f"act_mute_600_{cid}_{uid}")
-    b.button(text="🔇 1год", callback_data=f"act_mute_3600_{cid}_{uid}")
-    b.button(text="⚠️ Варн", callback_data=f"act_warn_{cid}_{uid}")
-    b.button(text="🔨 Бан", callback_data=f"act_ban_{cid}_{uid}")
-    b.button(text="🔊 Розмут", callback_data=f"act_unmute_{cid}_{uid}")
-    b.adjust(2,2,1)
+    b.button(text="✅ Я не бот — пройти перевірку", callback_data=f"verify_{uid}")
     return b.as_markup()
 
 def kb_captcha(uid, correct, opts):
@@ -199,620 +118,191 @@ def kb_captcha(uid, correct, opts):
     b.adjust(2,2)
     return b.as_markup()
 
-def kb_verify(uid):
-    b=InlineKeyboardBuilder()
-    b.button(text="✅ Я не бот", callback_data=f"verify_{uid}")
-    b.adjust(1)
-    return b.as_markup()
+# ==================== ОСНОВНА ЛОГІКА ПОКАРАННЯ ====================
+async def punish_user(bot, chat_id, user, reason, punish_type="мут"):
+    """
+    Ланцюжок: мут 1/3 -> 2/3 -> 3/3 -> варн 1/3 -> 2/3 -> 3/3 -> бан
+    """
+    cid=str(chat_id)
+    mutes_before, warns_before = db.get_stats(cid, user.id)
+    
+    # Додаємо мут
+    result, warns_after, mutes_after = db.add_mute(cid, user.id, user.first_name)
+    
+    # Видаляємо повідомлення порушника якщо є
+    # (видалення робиться в auto_mod, тут тільки покарання)
+    
+    if result=="mute":
+        # Просто мут
+        try:
+            await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(minutes=10))
+            await bot.send_message(chat_id, f"🔇 <b>Авто-покарання</b> ✨\n👤 {esc(user.first_name)} | ID: <code>{user.id}</code>\n📛 Причина: {esc(reason)}\n🔇 Покарання: мут 10хв [{mutes_after}/3]\n⚠️ Варни: [{warns_after}/3]\n\n<i>3/3 мута = 1 варн, 3/3 варна = бан</i>")
+        except Exception as e:
+            await bot.send_message(chat_id, f"🔇 {esc(user.first_name)} порушив: {esc(reason)} — мут {mutes_after}/3, варн {warns_after}/3, але не вдалося замутити: {e}")
+    
+    elif result=="warn":
+        # 3 мута превратились в варн
+        if warns_after>=3:
+            # 3/3 варна = бан
+            try:
+                await bot.ban_chat_member(chat_id, user.id)
+                # Скидаємо
+                u=db.get_user(cid, user.id)
+                u["mutes"]=0; u["warns"]=0; db.save()
+                await bot.send_message(chat_id, f"💥 <b>Авто-бан</b> ✨\n👤 {esc(user.first_name)} | ID: <code>{user.id}</code>\n📛 Причина: {esc(reason)}\n🔨 Покарання: бан назавжди\n⚠️ Досяг {warns_after}/3 варнів (3/3 мута = 1 варн)\n\n<i>Ланцюжок: мут 3/3 → варн, варн 3/3 → бан</i>")
+            except Exception as e:
+                await bot.send_message(chat_id, f"💥 {esc(user.first_name)} мав отримати бан за {esc(reason)}, але помилка: {e}")
+        else:
+            # Варн видано
+            try:
+                await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(minutes=30))
+                await bot.send_message(chat_id, f"⚠️ <b>Авто-варн</b> ✨\n👤 {esc(user.first_name)} | ID: <code>{user.id}</code>\n📛 Причина: {esc(reason)} + 3/3 мута\n🔇 Покарання: мут 30хв + варн\n🔇 Мути: [0/3] (скинуто)\n⚠️ Варни: [{warns_after}/3]\n\n<i>3/3 варна = бан</i>")
+            except:
+                await bot.send_message(chat_id, f"⚠️ {esc(user.first_name)} отримав варн {warns_after}/3 за {esc(reason)} (3/3 мута)")
 
 # ==================== КОМАНДИ ====================
 async def cmd_start(message: Message, bot: Bot):
-    info=await bot.get_me()
     if message.chat.type=="private":
-        txt=f"""<b>AETHER GAME</b> — захист + ігри ✨
-
-Я — модератор з іграми!
-
-<b>🛡️ Захист:</b>
-• Видаляю мати ({len(BAD_WORDS)}+), лінки, флуд
-• Капча, вітання, прощання
-
-<b>🎮 Гра:</b>
-• Хрестики-Нолики на 2 гравців прямо в чаті!
-• Поле оновлюється по черзі для кожного
-• Топ гравців
-
-<b>Як підключити:</b>
-1. Додай в чат кнопкою
-2. Дай адмінку
-3. Я напишу панель в чаті
-
-Все кнопками, з анімаціями!
-"""
-        await message.answer(txt, reply_markup=kb_private(info.username))
+        await message.answer(f"<b>AETHER SIMPLE</b> ✨\n\nЯ працюю тільки в групі і все роблю автоматично:\n\n🤬 Мат → мут 10хв\n🔗 Лінк → мут 5хв\n🌊 Флуд 4 повід/5с → мут 10хв\n📢 Спам → мут\n\n<b>Ланцюжок:</b>\n🔇 Мут [1/3] → [2/3] → [3/3] = ⚠️ Варн [1/3]\n⚠️ Варн [1/3] → [2/3] → [3/3] = 🔨 Бан\n\n👋 Вітання + прощання + капча з емодзі\n\nДодай мене в групу і дай адмінку — я сам все зроблю!")
     else:
         ch=db.get_chat(message.chat.id); ch["title"]=message.chat.title or ""; db.save()
-        try:
-            bot_mem=await bot.get_chat_member(message.chat.id, info.id)
-            if not is_admin_obj(bot_mem):
-                await message.answer(f"👋 Я <b>AETHER GAME</b> ✨\nДай мені адмінку з усіма правами і я напишу панель!")
-                return
-        except: pass
-        if not await is_admin(bot, message): return
-        ch["bot_is_admin"]=True; db.save()
-        txt=f"""<b>AETHER GAME активований</b> ✨
+        await message.answer(f"✨ <b>AETHER SIMPLE</b> активний в {esc(message.chat.title or 'чаті')}!\n\nЯ працюю автоматично:\n🔇 Мут → ⚠️ Варн → 🔨 Бан\n3/3 мута = 1 варн, 3/3 варна = бан\n\n👋 Вітання/прощання + 🤖 Капча\n\nВ чаті пишу хто що порушив.")
 
-<b>Чат:</b> {escape(message.chat.title or '')}
-<b>Матів:</b> {len(BAD_WORDS)}+
-
-<b>Що є:</b>
-🛡️ Авто-модерація з видаленням
-🎮 Гра Хрестики-Нолики (2 гравці)
-🤖 Капча, вітання, прощання
-
-Керуй кнопками:
-"""
-        await message.answer(txt, reply_markup=kb_group_main(message.chat.id))
-
-async def cmd_help(message: Message, bot: Bot):
-    if message.chat.type!="private" and not await is_admin(bot, message): return
-    if message.chat.type=="private":
-        info=await bot.get_me()
-        await message.answer("<b>AETHER</b> ✨ Натисни щоб додати:", reply_markup=kb_private(info.username))
-    else:
-        await message.answer(f"<b>AETHER GAME</b> ✨ Панель:", reply_markup=kb_group_main(message.chat.id))
-
-async def cmd_game(message: Message, bot: Bot):
-    # Команда для гри в чаті
-    if message.chat.type=="private":
-        return await message.answer("🎮 Гра працює тільки в групі! Додай бота в чат.")
-    txt="""<b>🎮 Хрестики-Нолики</b> ✨
-
-Гра для 2 гравців прямо в чаті!
-
-<b>Як грати:</b>
-1. Натисни «Створити гру»
-2. Другий гравець натискає «Приєднатись»
-3. Ходите по черзі, поле оновлюється автоматично!
-
-Хто перший збере 3 в ряд — виграв! 🏆
-"""
-    await message.answer(txt, reply_markup=kb_game_lobby())
-
-async def cmd_mute(message: Message, bot: Bot):
-    if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("❌ Відповідай на повідомлення!")
-    target=message.reply_to_message.from_user
-    sec=parse_time(message.text.split()[1]) if len(message.text.split())>1 else 600
-    try:
-        await bot.restrict_chat_member(message.chat.id, target.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=sec))
-        await message.answer(f"🔇 {escape(target.first_name)} мут на {format_time(sec)} ✨", reply_markup=kb_mod(message.chat.id, target.id))
-        try: await message.reply_to_message.delete()
-        except: pass
-    except Exception as e: await message.answer(f"❌ {e}")
-
-async def cmd_unmute(message: Message, bot: Bot):
-    if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("❌ Відповідай!")
-    target=message.reply_to_message.from_user
-    try:
-        await bot.restrict_chat_member(message.chat.id, target.id, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True))
-        await message.answer(f"🔊 {escape(target.first_name)} розмучений ✨")
-    except Exception as e: await message.answer(f"❌ {e}")
-
-async def cmd_ban(message: Message, bot: Bot):
-    if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        return await message.answer("❌ Відповідай на повідомлення порушника!")
-    target=message.reply_to_message.from_user
-    reason=message.text.split(maxsplit=1)[1] if len(message.text.split(maxsplit=1))>1 else "Порушення"
-    try:
-        await bot.ban_chat_member(message.chat.id, target.id)
-        await message.answer(f"🔨 <b>Бан видано</b> ✨\n👤 {escape(target.first_name)} | ID: <code>{target.id}</code>\n📛 Причина: {escape(reason)}\n🔨 Покарання: бан назавжди\n👮 Адмін: {escape(message.from_user.first_name)}")
-        try: await message.reply_to_message.delete()
-        except: pass
-    except Exception as e: await message.answer(f"❌ {e}")
-
-async def cmd_clear(message: Message, bot: Bot):
-    if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
-    args=message.text.split()
-    try: num=int(args[1]) if len(args)>1 else 20
-    except: num=20
-    num=min(max(num,1),100)
-    deleted=0
-    for i in range(num+5):
-        try:
-            await bot.delete_message(message.chat.id, message.message_id - i)
-            deleted+=1; await asyncio.sleep(0.05)
-        except: continue
-    try:
-        m=await message.answer(f"🧹 Видалено {deleted} ✨")
-        await asyncio.sleep(2)
-        try: await m.delete()
-        except: pass
-    except: pass
-
-# ==================== CALLBACKS ====================
-async def cb_handler(call: CallbackQuery, bot: Bot):
-    global _game_counter
-    # Капча доступна всім, гра доступна всім, інше тільки адмінам
-    if call.data.startswith("cap_") or call.data.startswith("verify_") or call.data.startswith("ttt_"):
-        pass
-    else:
-        if call.message.chat.type!="private":
-            if not await is_admin(bot, call.message):
-                return await call.answer("❌ Тільки для адмінів!", show_alert=True)
-    
-    data=call.data
-    
-    # ===== ГРА ХРЕСТИКИ-НОЛИКИ =====
-    if data=="ttt_create":
-        _game_counter+=1
-        game_id=_game_counter
-        board=[""]*9
-        p1_name = call.from_user.first_name or "Гравець 1"
-        if p1_name.strip() in ["", "-"]: p1_name = f"Гравець {call.from_user.id%1000}"
-        _games[game_id]={"board":board, "players":[call.from_user.id], "player_names":[p1_name], "turn":0, "chat_id":call.message.chat.id, "message_id":None, "status":"waiting"}
-        b=InlineKeyboardBuilder()
-        b.button(text="👋 Приєднатись як ⭕", callback_data=f"ttt_join_{game_id}")
-        b.button(text="🚪 Скасувати", callback_data=f"ttt_cancel_{game_id}")
-        b.adjust(1,1)
-        board_str = render_board(board)
-        txt = f"<b>🎮 Гра #{game_id} створена!</b> ✨\n\n❌ Гравець 1: {escape(p1_name)}\n⭕ Очікуємо гравця 2...\n\n{board_str}\n\nНатисни «Приєднатись» щоб грати!"
-
-        try:
-            msg=await call.message.answer(txt, reply_markup=b.as_markup())
-            _games[game_id]["message_id"]=msg.message_id
-            await call.answer("Гру створено! Очікуємо другого гравця")
-        except Exception as e: await call.answer(f"Помилка: {e}", show_alert=True)
-        return
-    
-    if data.startswith("ttt_join_"):
-        game_id=int(data.split("_")[2])
-        game=_games.get(game_id)
-        if not game: return await call.answer("Гра не знайдена", show_alert=True)
-        if game["status"]!="waiting": return await call.answer("Гра вже почалась", show_alert=True)
-        if call.from_user.id in game["players"]: return await call.answer("Ти вже в грі!", show_alert=True)
-        if len(game["players"])>=2: return await call.answer("Місця зайняті (макс 2)", show_alert=True)
-        
-        p2_name = call.from_user.first_name or "Гравець 2"
-        if p2_name.strip() in ["", "-"]: p2_name = f"Гравець {call.from_user.id%1000}"
-        game["players"].append(call.from_user.id)
-        game["player_names"].append(p2_name)
-        game["status"]="playing"
-
-        
-        board_str = render_board(game["board"])
-        p1 = escape(game["player_names"][0])
-        p2 = escape(game["player_names"][1])
-        txt = f"<b>🎮 Гра #{game_id} почалась! ✨</b>\n\n❌ {p1} vs ⭕ {p2}\n\nХід: ❌ {p1} — твій хід!\n\n{board_str}"
-
-        try:
-            await bot.edit_message_text(chat_id=game["chat_id"], message_id=game["message_id"], text=txt, reply_markup=kb_tictactoe(game_id, game["board"]))
-            await call.answer(f"Ти приєднався як ⭕! Твій хід після {game['player_names'][0]}")
-        except: await call.answer("Приєднався!")
-        return
-    
-    if data.startswith("ttt_move_"):
-        _, _, game_id_s, pos_s = data.split("_")
-        game_id=int(game_id_s); pos=int(pos_s)
-        game=_games.get(game_id)
-        if not game: return await call.answer("Гра не знайдена", show_alert=True)
-        if game["status"]!="playing": return await call.answer("Гра закінчена", show_alert=True)
-        if call.from_user.id not in game["players"]: return await call.answer("Ти не учасник цієї гри!", show_alert=True)
-        
-        current_player_idx = game["turn"] % 2
-        if game["players"][current_player_idx]!=call.from_user.id:
-            return await call.answer(f"Зараз хід {game['player_names'][current_player_idx]}!", show_alert=True)
-        
-        if game["board"][pos]!="": return await call.answer("Клітинка зайнята!", show_alert=True)
-        
-        symbol = "X" if current_player_idx==0 else "O"
-        game["board"][pos]=symbol
-        game["turn"]+=1
-        
-        winner=check_winner(game["board"])
-        if winner:
-            if winner=="draw":
-                board_str = render_board(game["board"])
-                p1 = escape(game["player_names"][0])
-                p2 = escape(game["player_names"][1])
-                txt = f"<b>🎮 Гра #{game_id} — Нічия! 🤝</b>\n\n{board_str}\n\n{p1} (❌) vs {p2} (⭕)\nНічия! Спробуйте ще!"
-
-                b=InlineKeyboardBuilder()
-                b.button(text="🔄 Нова гра", callback_data="ttt_create")
-                b.adjust(1)
-            else:
-                win_idx = 0 if winner=="X" else 1
-                win_name = game["player_names"][win_idx]
-                # Зберігаємо перемогу
-                ch=db.get_chat(game["chat_id"])
-                ch["games_won"][str(game["players"][win_idx])]=ch["games_won"].get(str(game["players"][win_idx]),0)+1
-                db.save()
-                board_str = render_board(game["board"])
-                p1 = escape(game["player_names"][0])
-                p2 = escape(game["player_names"][1])
-                win_emoji = "❌" if winner=="X" else "⭕"
-                txt = f"<b>🎮 Гра #{game_id} — Перемога! 🏆</b>\n\n{board_str}\n\n🏆 Переміг: {escape(win_name)} ({win_emoji})!\n{p1} (❌) vs {p2} (⭕)\n\nВітаємо! ✨"
-
-                b=InlineKeyboardBuilder()
-                b.button(text="🔄 Реванш", callback_data="ttt_create")
-                b.button(text="📊 Топ", callback_data="ttt_top")
-                b.adjust(1,1)
-            game["status"]="finished"
-            try:
-                await bot.edit_message_text(chat_id=game["chat_id"], message_id=game["message_id"], text=txt, reply_markup=b.as_markup())
-            except: pass
-            await call.answer(f"{'Нічия!' if winner=='draw' else f'Переміг {win_name}!'}")
-            # Видаляємо гру через 60с
-            await asyncio.sleep(60)
-            _games.pop(game_id, None)
-            return
-        else:
-            next_idx = game["turn"] % 2
-            board_str = render_board(game["board"])
-            p1 = escape(game["player_names"][0])
-            p2 = escape(game["player_names"][1])
-            next_emoji = "❌" if next_idx==0 else "⭕"
-            next_name = escape(game["player_names"][next_idx])
-            txt = f"<b>🎮 Гра #{game_id}</b> ✨\n\n❌ {p1} vs ⭕ {p2}\n\nХід: {next_emoji} {next_name}\n\n{board_str}"
-
-            try:
-                await bot.edit_message_text(chat_id=game["chat_id"], message_id=game["message_id"], text=txt, reply_markup=kb_tictactoe(game_id, game["board"]))
-                await call.answer(f"Ти поставив {'❌' if symbol=='X' else '⭕'}! Хід суперника")
-            except Exception as e: await call.answer(f"Хід зроблено!")
-        return
-    
-    if data.startswith("ttt_cancel_") or data.startswith("ttt_leave_"):
-        game_id=int(data.split("_")[2])
-        game=_games.get(game_id)
-        if game:
-            _games.pop(game_id, None)
-            try:
-                await bot.edit_message_text(chat_id=game["chat_id"], message_id=game["message_id"], text=f"🚪 Гра #{game_id} скасована")
-            except: pass
-        await call.answer("Гру скасовано")
-        return
-    
-    if data=="ttt_top":
-        ch=db.get_chat(call.message.chat.id)
-        top=sorted(ch.get("games_won",{}).items(), key=lambda x: x[1], reverse=True)[:10]
-        if not top:
-            txt="<b>📊 Топ гравців</b>\n\nЩе нема перемог. Зіграй першим! 🎮"
-        else:
-            lines=[]
-            for i,(uid,wins) in enumerate(top):
-                # Спробуємо отримати ім'я з бази
-                name = ch["users"].get(uid,{}).get("name", f"Гравець {uid[:4]}")
-                # Краще взяти з player_names якщо є
-                lines.append(f"{i+1}. {name} — {wins} перемог 🏆")
-            txt="<b>📊 Топ гравців AETHER</b> 🏆\n\n" + "\n".join(lines)
-        b=InlineKeyboardBuilder()
-        b.button(text="🎮 Грати", callback_data="ttt_create")
-        b.button(text="◀️ Назад", callback_data=f"main_{call.message.chat.id}")
-        b.adjust(1,1)
-        await call.message.edit_text(txt, reply_markup=b.as_markup())
-        await call.answer()
-        return
-    
-    if data=="ttt_ignore":
-        await call.answer("Клітинка вже зайнята!", show_alert=True)
-        return
-    
-    # ===== СТАРІ КНОПКИ =====
-    if data=="about":
-        await call.message.edit_text(f"<b>AETHER GAME</b> ✨\n\n🤬 {len(BAD_WORDS)}+ матів\n🔗 Лінки, флуд, спам\n🤖 Капча з емодзі\n🎮 Гра Хрестики-Нолики на 2 гравців\n👋 Вітання/прощання\n\nВсе кнопками!", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="back").as_markup())
-        await call.answer(); return
-    if data=="about_game":
-        await call.message.edit_text("<b>🎮 Гра Хрестики-Нолики</b>\n\n• 2 гравці\n• Поле 3x3 оновлюється по черзі\n• Кнопки ⬜ → ❌/⭕\n• Перемога 3 в ряд\n• Топ гравців\n\nПрацює тільки в групі! Напиши /game", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data="back").as_markup())
-        await call.answer(); return
-    if data=="back":
-        info=await bot.get_me()
-        await call.message.edit_text("<b>AETHER GAME</b> ✨ Натисни щоб додати:", reply_markup=kb_private(info.username))
-        await call.answer(); return
-    
-    if data.startswith("main_"):
-        cid=int(data.split("_")[1])
-        ch=db.get_chat(cid)
-        await call.message.edit_text(f"<b>AETHER GAME</b> ✨\nЧат: {escape(ch.get('title',''))}", reply_markup=kb_group_main(cid))
-        await call.answer(); return
-    
-    if data.startswith("cfg_") or data.startswith("game_"):
-        cid=int(data.split("_")[1])
-        if data.startswith("cfg_"):
-            await call.message.edit_text(f"<b>⚙️ Налаштування</b> ID: <code>{cid}</code>", reply_markup=kb_settings(cid))
-        else:
-            await call.message.edit_text(f"<b>🎮 Гра</b> ✨\nОбери дію:", reply_markup=InlineKeyboardBuilder().button(text="🎮 Створити гру", callback_data="ttt_create").button(text="📊 Топ", callback_data="ttt_top").button(text="◀️ Назад", callback_data=f"main_{cid}").adjust(1,1,1).as_markup())
-        await call.answer(); return
-    
-    if data.startswith("rules_"):
-        cid=int(data.split("_")[1]); ch=db.get_chat(cid)
-        await call.message.edit_text(f"<b>📜 Правила</b> ✨\n\n{escape(ch['rules'])}", reply_markup=InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=f"main_{cid}").as_markup())
-        await call.answer(); return
-    
-    if data.startswith("tgl_"):
-        parts=data.split("_"); key=parts[1]
-        if len(parts)==4: key=parts[1]+"_"+parts[2]; cid=int(parts[3])
-        else: cid=int(parts[2])
-        ch=db.get_chat(cid)
-        if key in ch["settings"]:
-            ch["settings"][key]=not ch["settings"][key]; db.save()
-            await call.answer(f"{key} {'ON' if ch['settings'][key] else 'OFF'} ✨")
-            await call.message.edit_reply_markup(reply_markup=kb_settings(cid))
-        return
-    
-    if data.startswith("clear_"):
-        num=int(data.split("_")[1]); cid=int(data.split("_")[2])
-        deleted=0
-        for i in range(num+5):
-            try: await bot.delete_message(cid, call.message.message_id - i); deleted+=1; await asyncio.sleep(0.05)
-            except: continue
-        await call.answer(f"Видалено {deleted} ✨"); return
-    
-    if data.startswith("act_"):
-        parts=data.split("_"); action=parts[1]
-        if action=="mute":
-            sec=int(parts[2]); cid=int(parts[3]); uid=int(parts[4])
-            try: await bot.restrict_chat_member(cid, uid, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=sec)); await call.message.edit_text(f"🔇 Мут {format_time(sec)} ✨")
-            except Exception as e: await call.answer(f"{e}", show_alert=True)
-        elif action=="warn":
-            cid=int(parts[2]); uid=int(parts[3]); cnt=db.add_warn(cid, uid); await call.message.edit_text(f"⚠️ Варн {cnt}/3 ✨")
-        elif action=="unwarn":
-            cid=int(parts[2]); uid=int(parts[3]); new=db.dec_warn(cid, uid); await call.message.edit_text(f"✅ Знято {new}/3 ✨")
-        elif action=="ban":
-            cid=int(parts[2]); uid=int(parts[3])
-            try: await bot.ban_chat_member(cid, uid); await call.message.edit_text("🔨 Забанений ✨")
-            except Exception as e: await call.answer(f"{e}", show_alert=True)
-        elif action=="unmute":
-            cid=int(parts[2]); uid=int(parts[3])
-            try: await bot.restrict_chat_member(cid, uid, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True)); await call.message.edit_text("🔊 Розмучений ✨")
-            except Exception as e: await call.answer(f"{e}", show_alert=True)
-        await call.answer(); return
-    
-    if data.startswith("verify_"):
-        uid=int(data.split("_")[1])
-        if call.from_user.id!=uid: return await call.answer("Не твоя капча!", show_alert=True)
-        emojis=["🦊","🐶","🐱","🐰","🦁","🐯"]; correct=random.choice(emojis); opts=random.sample(emojis,4)
-        if correct not in opts: opts[0]=correct
-        random.shuffle(opts)
-        _captcha[(call.message.chat.id, uid)]=correct
-        await call.message.edit_text(f"<b>Перевірка</b> ✨ Натисни <b>{correct}</b>:", reply_markup=kb_captcha(uid, correct, opts))
-        await call.answer(); return
-    
-    if data.startswith("cap_"):
-        _, uid_s, chosen, correct = data.split("_",3)
-        uid_s=int(uid_s)
-        if call.from_user.id!=uid_s: return await call.answer("Не твоя капча!", show_alert=True)
-        if chosen==correct:
-            _captcha.pop((call.message.chat.id, uid_s),None)
-            try:
-                await bot.restrict_chat_member(call.message.chat.id, uid_s, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True))
-                ch=db.get_chat(call.message.chat.id)
-                welcome=ch["welcome_text"].format(name=escape(call.from_user.first_name), chat=escape(call.message.chat.title or "чат"))
-                await call.message.edit_text(f"{welcome}\n\n✅ Ласкаво просимо! ✨")
-            except: await call.message.edit_text("✅ Пройдено ✨")
-            await call.answer("Вітаємо!")
-        else:
-            try:
-                await bot.ban_chat_member(call.message.chat.id, uid_s)
-                await bot.unban_chat_member(call.message.chat.id, uid_s)
-                await call.message.edit_text(f"🚫 {escape(call.from_user.first_name)} не пройшов")
-            except: pass
-            await call.answer("Невірно!", show_alert=True)
-        return
-
+# ==================== АВТО-МОДЕРАЦІЯ - ГОЛОВНЕ ====================
 async def auto_mod(message: Message, bot: Bot):
     if not message.from_user or message.from_user.is_bot: return
     if message.chat.type not in {"group","supergroup"}: return
-    if message.sender_chat and message.chat and message.sender_chat.id == message.chat.id: return
+    if message.sender_chat and message.chat and message.sender_chat.id==message.chat.id: return
     try:
         mem=await bot.get_chat_member(message.chat.id, message.from_user.id)
         if is_admin_obj(mem): return
     except: pass
-    ch=db.get_chat(message.chat.id); s=ch["settings"]; text=message.text or message.caption or ""
-    uid=str(message.from_user.id)
-    if uid not in ch["users"]: ch["users"][uid]={"warns":0,"messages":0,"name":message.from_user.first_name}
-    ch["users"][uid]["messages"]=ch["users"][uid].get("messages",0)+1
-    ch["users"][uid]["name"]=message.from_user.first_name
-    ch["users"][uid]["last_seen"]=datetime.now().isoformat()
+
+    text=message.text or message.caption or ""
+    user=message.from_user
+    cid=str(message.chat.id)
+    
+    # Оновлюємо лічильник повідомлень
+    u=db.get_user(cid, user.id, user.first_name)
+    u["messages"]=u.get("messages",0)+1
     db.save()
 
-    # === ФЛУД ===
-    if s.get("antiflood") and is_flood(message.chat.id, message.from_user.id):
+    # 1. ФЛУД
+    if is_flood(message.chat.id, user.id):
         try: await message.delete()
         except: pass
-        cnt = db.get_warns(message.chat.id, message.from_user.id)
-        if s.get("autowarn"):
-            cnt = db.add_warn(message.chat.id, message.from_user.id)
-        if s.get("automute"):
-            try:
-                await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=600))
-                await bot.send_message(message.chat.id, f"🌊 <b>Авто-покарання</b> ✨\n👤 {escape(message.from_user.first_name)} | ID: <code>{message.from_user.id}</code>\n📛 Причина: флуд (4 повід. за 5с)\n🔇 Покарання: мут 10хв\n⚠️ Варни: {cnt}/{ch['warn_limit']}", reply_markup=kb_mod(message.chat.id, message.from_user.id))
-            except Exception as e:
-                await bot.send_message(message.chat.id, f"🌊 Флуд від {escape(message.from_user.first_name)} видалено, але мут не вдався: {e}")
-        _flood[(message.chat.id, message.from_user.id)]=[]
+        _flood[(message.chat.id, user.id)]=[]
+        await punish_user(bot, message.chat.id, user, "флуд (4 повід. за 5с)", "мут")
         return
 
-    # === ЛІНКИ ===
-    if s.get("antilink") and contains_link(text):
+    # 2. СПАМ
+    spam_reason=is_spam(text)
+    if spam_reason:
         try: await message.delete()
         except: pass
-        cnt = db.add_warn(message.chat.id, message.from_user.id) if s.get("autowarn") else db.get_warns(message.chat.id, message.from_user.id)
-        if s.get("automute"):
-            try:
-                await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=300))
-                await bot.send_message(message.chat.id, f"🔗 <b>Авто-покарання</b> ✨\n👤 {escape(message.from_user.first_name)} | ID: <code>{message.from_user.id}</code>\n📛 Причина: лінк / реклама\n🔇 Покарання: мут 5хв + варн\n⚠️ Варни: {cnt}/{ch['warn_limit']}\n📝 Повідомлення видалено", reply_markup=kb_mod(message.chat.id, message.from_user.id))
-            except Exception as e:
-                await bot.send_message(message.chat.id, f"🔗 Лінк від {escape(message.from_user.first_name)} видалено {cnt}/{ch['warn_limit']}")
-        if cnt>=ch["warn_limit"]:
-            try:
-                await bot.ban_chat_member(message.chat.id, message.from_user.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"]))
-                db.clear_warns(message.chat.id, message.from_user.id)
-                await bot.send_message(message.chat.id, f"💥 <b>Авто-бан</b> ✨\n👤 {escape(message.from_user.first_name)} отримав {ch['warn_limit']}/{ch['warn_limit']} варнів і забанений на {format_time(ch['ban_time'])}!")
-            except: pass
+        await punish_user(bot, message.chat.id, user, f"спам ({spam_reason})", "мут")
         return
 
-    # === МАТИ ===
-    if s.get("antimat"):
-        bad=contains_bad(text, ch.get("banned_words",[]))
-        if bad:
-            try: await message.delete()
-            except: pass
-            cnt=db.add_warn(message.chat.id, message.from_user.id) if s.get("autowarn") else db.get_warns(message.chat.id, message.from_user.id)
-            if not s.get("autowarn"):
-                cnt=db.add_warn(message.chat.id, message.from_user.id)
-            if s.get("automute"):
-                try:
-                    await bot.restrict_chat_member(message.chat.id, message.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.now()+timedelta(seconds=ch["mute_time"]))
-                    await bot.send_message(message.chat.id, f"🤬 <b>Авто-покарання</b> ✨\n👤 {escape(message.from_user.first_name)} | ID: <code>{message.from_user.id}</code>\n📛 Причина: мат (<code>{escape(bad)}</code>)\n🔇 Покарання: мут {format_time(ch['mute_time'])} + варн\n⚠️ Варни: {cnt}/{ch['warn_limit']}\n📝 Повідомлення видалено: <i>{escape(text[:100])}</i>", reply_markup=kb_mod(message.chat.id, message.from_user.id))
-                except Exception as e:
-                    await bot.send_message(message.chat.id, f"🤬 Мат від {escape(message.from_user.first_name)} (<code>{escape(bad)}</code>) видалено, варн {cnt}/{ch['warn_limit']}")
-            if cnt>=ch["warn_limit"]:
-                try:
-                    await bot.ban_chat_member(message.chat.id, message.from_user.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"]))
-                    db.clear_warns(message.chat.id, message.from_user.id)
-                    await bot.send_message(message.chat.id, f"💥 <b>Авто-бан</b> ✨\n👤 {escape(message.from_user.first_name)} | {ch['warn_limit']}/{ch['warn_limit']} варнів за мати! Забанений на {format_time(ch['ban_time'])}!")
-                except: pass
-            return
+    # 3. ЛІНКИ
+    if contains_link(text):
+        try: await message.delete()
+        except: pass
+        await punish_user(bot, message.chat.id, user, "лінк / реклама", "мут")
+        return
 
+    # 4. МАТИ / ОБРАЗИ
+    bad=contains_bad(text)
+    if bad:
+        try: await message.delete()
+        except: pass
+        await punish_user(bot, message.chat.id, user, f"мат / образа ({bad})", "мут")
+        return
+
+# ==================== ВІТАННЯ / ПРОЩАННЯ / КАПЧА ====================
 async def welcome_handler(event: ChatMemberUpdated, bot: Bot):
     ch=db.get_chat(event.chat.id)
+    
+    # ХТОСЬ ЗАЙШОВ
     if event.old_chat_member.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED} and event.new_chat_member.status in {ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED}:
         user=event.new_chat_member.user
         if user.is_bot: return
-        uid=str(user.id); ch["users"][uid]=ch["users"].get(uid,{"warns":0,"messages":0}); db.save()
-        if ch["settings"].get("captcha", True):
+        
+        # Додаємо в базу
+        db.get_user(event.chat.id, user.id, user.first_name)
+        
+        # Капча - красива
+        try:
+            await bot.restrict_chat_member(event.chat.id, user.id, permissions=ChatPermissions(can_send_messages=False))
+            await bot.send_message(event.chat.id, f"👋 Привіт, {esc(user.first_name)}! Ласкаво просимо в {esc(event.chat.title or 'чат')} ✨\n\nЩоб довести що ти не бот, пройди перевірку:", reply_markup=kb_verify(user.id))
+        except Exception as e:
+            logger.warning(f"captcha failed: {e}")
+            # Якщо не вдалося пройти капчу - просто вітаємо
             try:
-                await bot.restrict_chat_member(event.chat.id, user.id, permissions=ChatPermissions(can_send_messages=False))
-                await bot.send_message(event.chat.id, f"Привіт, {escape(user.first_name)} 👋 Ласкаво! Пройди перевірку:", reply_markup=kb_verify(user.id))
+                await bot.send_message(event.chat.id, f"👋 Привіт, {esc(user.first_name)}! Ласкаво просимо в {esc(event.chat.title or 'чат')} ✨ Раді тебе бачити! 🫶")
             except: pass
-        else:
-            if ch["settings"].get("welcome", True):
-                try: await bot.send_message(event.chat.id, ch["welcome_text"].format(name=escape(user.first_name), chat=escape(event.chat.title or "чат")))
-                except: pass
+    
+    # ХТОСЬ ВИЙШОВ
+    elif event.old_chat_member.status in {ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR} and event.new_chat_member.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED}:
+        user=event.old_chat_member.user
+        if user.is_bot: return
+        try:
+            await bot.send_message(event.chat.id, f"👋 Бувай, {esc(user.first_name)}! Сумуватимемо 💫 Повертайся знову ✨")
+        except: pass
 
 async def bot_admin_handler(event: ChatMemberUpdated, bot: Bot):
     if event.new_chat_member.user.id != bot.id: return
     if not is_admin_obj(event.new_chat_member): return
     if is_admin_obj(event.old_chat_member): return
-    ch=db.get_chat(event.chat.id)
-    ch["bot_is_admin"]=True; ch["title"]=event.chat.title or ""; db.save()
-    txt=f"""<b>AETHER GAME активований</b> ✨
-
-Чат: {escape(event.chat.title or '')}
-
-🛡️ Авто-видалення мату, лінків, флуду
-🎮 Гра Хрестики-Нолики — /game
-🤖 Капча, вітання, прощання
-
-Керуй кнопками (тільки адміни):
-"""
-    try: await bot.send_message(event.chat.id, txt, reply_markup=kb_group_main(event.chat.id))
+    try:
+        await bot.send_message(event.chat.id, f"✨ <b>AETHER</b> активований в {esc(event.chat.title or 'чаті')}!\n\nЯ працюю автоматично без налаштувань:\n🔇 Мут [1/3] [2/3] [3/3] → ⚠️ Варн [1/3]\n⚠️ Варн [1/3] [2/3] [3/3] → 🔨 Бан\n\n🤬 Мат, 🔗 Лінк, 🌊 Флуд, 📢 Спам → мут\n👋 Вітання + прощання + 🤖 Капча\n\nВ чаті пишу хто що порушив ✨")
     except: pass
 
+async def cb_handler(call: CallbackQuery, bot: Bot):
+    data=call.data
+    
+    if data.startswith("verify_"):
+        uid=int(data.split("_")[1])
+        if call.from_user.id!=uid:
+            return await call.answer("Киш киш,це не твоя капча!", show_alert=True)
+        emojis=["🦊","🐶","🐱","🐰","🦁","🐯","🐻","🐼","🦄","🐙"]
+        correct=random.choice(emojis); opts=random.sample(emojis,4)
+        if correct not in opts: opts[0]=correct
+        random.shuffle(opts)
+        _captcha[(call.message.chat.id, uid)]=correct
+        await call.message.edit_text(f"<b>🤖 Перевірка AETHER</b> ✨\n\n{esc(call.from_user.first_name)}, доведи що ти не бот — натисни <b>{correct}</b>:", reply_markup=kb_captcha(uid, correct, opts))
+        await call.answer()
+        return
+    
+    if data.startswith("cap_"):
+        _, uid_s, chosen, correct = data.split("_",3)
+        uid_s=int(uid_s)
+        if call.from_user.id!=uid_s:
+            return await call.answer("Не твоя капча!", show_alert=True)
+        key=(call.message.chat.id, uid_s)
+        if chosen==correct:
+            _captcha.pop(key,None)
+            try:
+                await bot.restrict_chat_member(call.message.chat.id, uid_s, permissions=ChatPermissions(can_send_messages=True,can_send_media_messages=True,can_send_other_messages=True,can_add_web_page_previews=True))
+                await call.message.edit_text(f"👋 Привіт, {esc(call.from_user.first_name)}! Ласкаво просимо в {esc(call.message.chat.title or 'чат')} ✨\n\n✅ Перевірку пройдено! Раді тебе бачити 🫶")
+            except:
+                await call.message.edit_text("✅ Перевірку пройдено! Ласкаво просимо ✨")
+            await call.answer("Вітаємо! ✨")
+        else:
+            try:
+                await bot.ban_chat_member(call.message.chat.id, uid_s)
+                await bot.unban_chat_member(call.message.chat.id, uid_s)
+                await call.message.edit_text(f"🚫 {esc(call.from_user.first_name)} не пройшов перевірку і кікнутий")
+            except: pass
+            await call.answer("Невірно! ❌", show_alert=True)
+        return
+
 async def main():
-    bot=Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot=Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     await bot.delete_webhook(drop_pending_updates=True)
     dp=Dispatcher(storage=MemoryStorage())
 
     @dp.message(CommandStart())
     async def h_start(m: Message): await cmd_start(m, bot)
-    @dp.message(Command("help"))
-    async def h_help(m: Message): await cmd_help(m, bot)
-    @dp.message(Command("game"))
-    async def h_game(m: Message): await cmd_game(m, bot)
-    @dp.message(Command("mute"))
-    async def h_mute(m: Message): await cmd_mute(m, bot)
-    @dp.message(Command("unmute"))
-    async def h_unmute(m: Message): await cmd_unmute(m, bot)
-    @dp.message(Command("ban"))
-    async def h_ban(m: Message): await cmd_ban(m, bot)
-    @dp.message(Command("clear"))
-    async def h_clear(m: Message): await cmd_clear(m, bot)
-    @dp.message(Command("warns"))
-    async def h_warns(m: Message): 
-        if m.reply_to_message and m.reply_to_message.from_user:
-            target=m.reply_to_message.from_user
-            cnt=db.get_warns(m.chat.id, target.id)
-            await m.answer(f"⚠️ {escape(target.first_name)} — {cnt}/{db.get_chat(m.chat.id)['warn_limit']} варнів", reply_markup=kb_mod(m.chat.id, target.id))
-        else:
-            ch=db.get_chat(m.chat.id)
-            warned=[(uid, u) for uid,u in ch["users"].items() if u.get("warns",0)>0]
-            if not warned:
-                await m.answer("✅ Нема користувачів з варнами ✨")
-            else:
-                txt="<b>⚠️ Список варнів</b> ✨\n\n"
-                for uid,u in sorted(warned, key=lambda x: x[1]["warns"], reverse=True)[:20]:
-                    txt+=f"👤 {escape(u.get('name','Unknown'))} | ID: <code>{uid}</code> — {u['warns']}/{ch['warn_limit']} варнів\n"
-                await m.answer(txt)
-    @dp.message(Command("stats"))
-    async def h_stats(m: Message):
-        ch=db.get_chat(m.chat.id)
-        total_users=len(ch["users"])
-        total_msgs=sum([u.get("messages",0) for u in ch["users"].values()])
-        total_warns=sum([u.get("warns",0) for u in ch["users"].values()])
-        top_active=sorted(ch["users"].items(), key=lambda x: x[1].get("messages",0), reverse=True)[:5]
-        txt=f"<b>📊 Статистика чату {escape(ch.get('title',''))}</b> ✨\n\n👥 Всього юзерів в базі: {total_users}\n💬 Повідомлень: {total_msgs}\n⚠️ Варнів видано: {total_warns}\n🎮 Ігор виграно: {sum(ch.get('games_won',{}).values())}\n\n<b>Топ активних:</b>\n"
-        for i,(uid,u) in enumerate(top_active):
-            txt+=f"{i+1}. {escape(u.get('name','Unknown'))} — {u.get('messages',0)} повід.\n"
-        await m.answer(txt)
-    @dp.message(Command("top"))
-    async def h_top(m: Message):
-        ch=db.get_chat(m.chat.id)
-        top=sorted(ch.get("games_won",{}).items(), key=lambda x: x[1], reverse=True)[:10]
-        if not top:
-            await m.answer("📊 Топ порожній. Зіграй в /game!")
-        else:
-            txt="<b>🏆 Топ гравців</b> ✨\n\n"
-            for i,(uid,wins) in enumerate(top):
-                name=ch["users"].get(uid,{}).get("name", f"ID {uid}")
-                txt+=f"{i+1}. {escape(name)} — {wins} перемог\n"
-            await m.answer(txt)
-    @dp.message(Command("unwarn"))
-    async def h_unwarn(m: Message):
-        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
-        if not m.reply_to_message or not m.reply_to_message.from_user:
-            return await m.answer("❌ Відповідай на повідомлення!")
-        target=m.reply_to_message.from_user
-        new=db.dec_warn(m.chat.id, target.id)
-        await m.answer(f"✅ Знято варн з {escape(target.first_name)}. Тепер {new}/{db.get_chat(m.chat.id)['warn_limit']} ✨", reply_markup=kb_mod(m.chat.id, target.id))
-    @dp.message(Command("clearwarns"))
-    async def h_clearwarns(m: Message):
-        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
-        if not m.reply_to_message or not m.reply_to_message.from_user:
-            return await m.answer("❌ Відповідай!")
-        target=m.reply_to_message.from_user
-        db.clear_warns(m.chat.id, target.id)
-        await m.answer(f"✅ Варни очищені у {escape(target.first_name)} ✨")
-    @dp.message(Command("unban"))
-    async def h_unban2(m: Message):
-        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
-        if not m.reply_to_message or not m.reply_to_message.from_user:
-            return await m.answer("❌ Відповідай!")
-        target=m.reply_to_message.from_user
-        try:
-            await bot.unban_chat_member(m.chat.id, target.id)
-            await m.answer(f"✅ {escape(target.first_name)} розбанений ✨")
-        except Exception as e: await m.answer(f"❌ {e}")
-    @dp.message(Command("warn"))
-    async def h_warn(m: Message):
-        if not await is_admin(bot, m): return await m.answer("❌ Тільки для адмінів!")
-        if not m.reply_to_message or not m.reply_to_message.from_user:
-            return await m.answer("❌ Відповідай!")
-        target=m.reply_to_message.from_user
-        reason=m.text.split(maxsplit=1)[1] if len(m.text.split(maxsplit=1))>1 else "Порушення"
-        cnt=db.add_warn(m.chat.id, target.id)
-        ch=db.get_chat(m.chat.id)
-        await m.answer(f"⚠️ <b>Варн видано</b> ✨\n👤 {escape(target.first_name)} | ID: <code>{target.id}</code>\n📛 Причина: {escape(reason)}\n⚠️ Варни: {cnt}/{ch['warn_limit']}", reply_markup=kb_mod(m.chat.id, target.id))
-        if cnt>=ch["warn_limit"]:
-            try:
-                await bot.ban_chat_member(m.chat.id, target.id, until_date=datetime.now()+timedelta(seconds=ch["ban_time"]))
-                db.clear_warns(m.chat.id, target.id)
-                await m.answer(f"💥 Авто-бан {escape(target.first_name)} — {ch['warn_limit']}/{ch['warn_limit']}!")
-            except: pass
-
 
     @dp.callback_query()
     async def h_cb(c: CallbackQuery): await cb_handler(c, bot)
@@ -826,7 +316,7 @@ async def main():
     @dp.message(F.chat.type.in_({"group","supergroup"}))
     async def h_auto(m: Message): await auto_mod(m, bot)
 
-    logger.info("AETHER v11 GAME started!")
+    logger.info("AETHER SIMPLE v12 started - mute->warn->ban chain!")
     await dp.start_polling(bot)
 
 if __name__=="__main__":
