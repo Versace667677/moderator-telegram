@@ -225,7 +225,7 @@ async def cmd_start(message: Message, bot: Bot):
     if message.chat.type=="private": await message.answer(BOT_DESC)
     else:
         db.get_chat(message.chat.id)["title"]=message.chat.title or ""; db.save()
-        await message.answer(f"🔥 <b>AETHER — САМИЙ СУЧАСНИЙ ЖОСКИЙ БОТ 2026</b> активний! 🔥\n\nЯ — легенда 😎\n💎 Плюси: авто, миттєвий, пам'ятаю все, смішний, справедливий, капча, 24/7\n🔇 Мут 5хв [3/3]=⚠️ Варн [3/3]=🚀 Бан\n\nНапиши /help для повного опису!")
+        await message.answer(f"🔥 <b>AETHER</b> активний! 🔥\n\nЯ — легенда 😎\n💎 Плюси: авто, миттєвий, пам'ятаю все, смішний, справедливий, капча, 24/7\n🔇 Мут 5хв [3/3]=⚠️ Варн [3/3]=🚀 Бан\n\nНапиши /help для повного опису!")
 
 async def cmd_help(message: Message, bot: Bot): await message.answer(BOT_DESC + "\n\n" + RULES_TEXT)
 
