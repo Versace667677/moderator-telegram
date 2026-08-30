@@ -149,17 +149,33 @@ def format_time(sec):
     return f"{sec//86400}д"
 
 async def check_admin(bot,m):
+    # 1. Анонімний адмін пише від імені групи - дозволяємо!
+    if m.sender_chat and m.chat and m.sender_chat.id == m.chat.id:
+        return True
+    # 2. Якщо нема from_user (рідко для анонімів) - дозволяємо якщо sender_chat == chat
+    if not m.from_user:
+        if m.sender_chat:
+            return True
+        return False
+    # 3. Звичайний адмін
     try:
         member=await bot.get_chat_member(m.chat.id, m.from_user.id)
         if is_admin_obj(member):
             db.add_admin(m.chat.id, m.from_user.id)
             return True
         return False
-    except: return False
+    except: 
+        return False
 
 async def target_is_admin(bot,m,uid):
     try: member=await bot.get_chat_member(m.chat.id, uid); return is_admin_obj(member)
     except: return False
+
+def is_anon_admin_message(m):
+    # Перевірка чи повідомлення від анонімного адміна
+    if m.sender_chat and m.chat and m.sender_chat.id == m.chat.id:
+        return True
+    return False
 
 # ================= KEYBOARDS =================
 def kb_main_private(is_admin=False):
@@ -400,7 +416,9 @@ async def cmd_mute(message: Message, bot: Bot):
     except Exception as e: await message.answer(f"❌ {e}")
 
 async def cmd_unmute(message: Message, bot: Bot):
-    if not await check_admin(bot,message): return
+    if not await check_admin(bot,message):
+        if not (message.sender_chat and message.chat and message.sender_chat.id == message.chat.id):
+            return
     if not message.reply_to_message: return await message.answer("❌ Відповідай!")
     target=message.reply_to_message.from_user
     try:
@@ -566,6 +584,9 @@ async def cb_handler(call: CallbackQuery, bot: Bot, state: FSMContext):
 
 # ================= AUTO MODERATION - ГОЛОВНЕ =================
 async def filter_handler(message: Message, bot: Bot):
+    # Анонімних адмінів і ботів не чіпаємо
+    if message.sender_chat and message.chat and message.sender_chat.id == message.chat.id:
+        return  # Анонімний адмін - не модеруємо
     if not message.from_user or message.from_user.is_bot: return
     if message.chat.type not in {"group","supergroup"}: return
     ch=db.get_chat(message.chat.id)
