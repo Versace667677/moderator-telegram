@@ -52,9 +52,9 @@ BOT_DESC = """
 
 <b>👮 ДЛЯ АДМІНА — 2 СПОСОБИ:</b>
 1) Відповідь на повідомлення: /mute 5m спам або !mute 10m
-2) Через @тег: !mute @krem_in 30 спам або /ban @username причина
+2) Через @тег: !mute @username 30 спам або /ban @username причина
 Підтримує / і ! — /mute /ban /warn /unmute /unban /unwarn /warns /stats
-Приклад: !mute @krem_in 30 заєбав або /ban @krem_in реклама
+Приклад: !mute @username 30 заєбав або /ban @username реклама
 
 Я — самий сучасний бот 2026, зроблений з душею 😂❤️
 """
@@ -140,7 +140,7 @@ async def resolve_target(message, bot):
     Повертає (user_id, user_obj, name, username) цілі
     Підтримує:
     1. Відповідь на повідомлення
-    2. @username в тексті: !mute @krem_in 30 спам
+    2. @username в тексті: !mute @username 30 спам
     3. Текстовий ментіон
     """
     # 1. Через відповідь
@@ -232,10 +232,10 @@ async def cmd_help(message: Message, bot: Bot): await message.answer(BOT_DESC + 
 async def cmd_mute(message: Message, bot: Bot):
     if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів, бро!")
     text=message.text or ""; args=text.split()
-    # Парсимо: !mute @krem_in 30 спам або /mute 5m або відповідь
+    # Парсимо: !mute @username 30 спам або /mute 5m або відповідь
     target_id, target_obj, target_name, target_username = await resolve_target(message, bot)
     if not target_id:
-        return await message.answer("❌ Не знайшов кого мутити!\n\n<b>2 способи:</b>\n1) Відповідай на повідомлення: /mute 5m спам\n2) Тегни: !mute @krem_in 30 спам\n\nПриклад: <code>!mute @krem_in 30 спам</code> або <code>/mute @username 10m флуд</code>")
+        return await message.answer("❌ Не знайшов кого мутити!\n\n<b>2 способи:</b>\n1) Відповідай на повідомлення: /mute 5m спам\n2) Тегни: !mute @username 30 спам\n\nПриклад: <code>!mute @username 30 спам</code> або <code>/mute @username 10m флуд</code>")
     # Парсимо час і причину з тексту після @username
     dur=300; reason="Трошки заєбав чат"
     # Видаляємо команду і @username з тексту щоб знайти час і причину
@@ -269,7 +269,7 @@ async def cmd_mute(message: Message, bot: Bot):
 async def cmd_ban(message: Message, bot: Bot):
     if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
     target_id, target_obj, target_name, target_username = await resolve_target(message, bot)
-    if not target_id: return await message.answer("❌ Не знайшов кого банити!\nПриклад: <code>!ban @krem_in реклама</code> або відповідай на повідомлення: <code>/ban спам</code>")
+    if not target_id: return await message.answer("❌ Не знайшов кого банити!\nПриклад: <code>!ban @username реклама</code> або відповідай на повідомлення: <code>/ban спам</code>")
     text=message.text or ""
     # Причина після @username
     remaining=re.sub(r"^[/!]\w+\s+@\w+\s*", "", text, flags=re.IGNORECASE)
@@ -284,7 +284,7 @@ async def cmd_ban(message: Message, bot: Bot):
 async def cmd_warn(message: Message, bot: Bot):
     if not await is_admin(bot, message): return await message.answer("❌ Тільки для адмінів!")
     target_id, target_obj, target_name, target_username = await resolve_target(message, bot)
-    if not target_id: return await message.answer("❌ Не знайшов! Приклад: <code>!warn @krem_in мат</code>")
+    if not target_id: return await message.answer("❌ Не знайшов! Приклад: <code>!warn @username мат</code>")
     text=message.text or ""
     remaining=re.sub(r"^[/!]\w+\s+@\w+\s*", "", text, flags=re.IGNORECASE)
     remaining=re.sub(r"^[/!]\w+\s+", "", remaining, flags=re.IGNORECASE) if not re.search(r"@\w+", text) else remaining
