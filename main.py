@@ -420,14 +420,11 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
         winner=check_winner(game["board"])
         if winner:
             if winner=="draw":
-                txt=f"""<b>🎮 Гра #{game_id} — Нічия! 🤝</b>
+                board_str = render_board(game["board"])
+                p1 = escape(game["player_names"][0])
+                p2 = escape(game["player_names"][1])
+                txt = f"<b>🎮 Гра #{game_id} — Нічия! 🤝</b>\n\n{board_str}\n\n{p1} (❌) vs {p2} (⭕)\nНічия! Спробуйте ще!"
 
-{render_board(game["board'])}
-
-{escape(game['player_names'][0])} (❌) vs {escape(game['player_names'][1])} (⭕)
-Нічия! Спробуйте ще!
-
-"""
                 b=InlineKeyboardBuilder()
                 b.button(text="🔄 Нова гра", callback_data="ttt_create")
                 b.adjust(1)
@@ -438,15 +435,12 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
                 ch=db.get_chat(game["chat_id"])
                 ch["games_won"][str(game["players"][win_idx])]=ch["games_won"].get(str(game["players"][win_idx]),0)+1
                 db.save()
-                txt=f"""<b>🎮 Гра #{game_id} — Перемога! 🏆</b>
+                board_str = render_board(game["board"])
+                p1 = escape(game["player_names"][0])
+                p2 = escape(game["player_names"][1])
+                win_emoji = "❌" if winner=="X" else "⭕"
+                txt = f"<b>🎮 Гра #{game_id} — Перемога! 🏆</b>\n\n{board_str}\n\n🏆 Переміг: {escape(win_name)} ({win_emoji})!\n{p1} (❌) vs {p2} (⭕)\n\nВітаємо! ✨"
 
-{render_board(game["board'])}
-
-🏆 Переміг: {escape(win_name)} ({'❌' if winner=='X' else '⭕'})!
-{escape(game['player_names'][0])} (❌) vs {escape(game['player_names'][1])} (⭕)
-
-Вітаємо! ✨
-"""
                 b=InlineKeyboardBuilder()
                 b.button(text="🔄 Реванш", callback_data="ttt_create")
                 b.button(text="📊 Топ", callback_data="ttt_top")
