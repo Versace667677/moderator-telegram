@@ -139,7 +139,7 @@ def kb_tictactoe(game_id, board):
             txt="❌" if board[i]=="X" else "⭕"
             b.button(text=txt, callback_data=f"ttt_ignore_{game_id}")
     b.button(text="🚪 Вийти з гри", callback_data=f"ttt_leave_{game_id}")
-    b.adjust(3,3,1)
+    b.adjust(3,3,3,1)  # ФІКС: 3x3 поле + кнопка виходу
     return b.as_markup()
 
 def kb_game_lobby():
@@ -352,20 +352,16 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
         _game_counter+=1
         game_id=_game_counter
         board=[""]*9
-        _games[game_id]={"board":board, "players":[call.from_user.id], "player_names":[call.from_user.first_name], "turn":0, "chat_id":call.message.chat.id, "message_id":None, "status":"waiting"}
+        p1_name = call.from_user.first_name or "Гравець 1"
+        if p1_name.strip() in ["", "-"]: p1_name = f"Гравець {call.from_user.id%1000}"
+        _games[game_id]={"board":board, "players":[call.from_user.id], "player_names":[p1_name], "turn":0, "chat_id":call.message.chat.id, "message_id":None, "status":"waiting"}
         b=InlineKeyboardBuilder()
-        b.button(text="👋 Приєднатись як O", callback_data=f"ttt_join_{game_id}")
+        b.button(text="👋 Приєднатись як ⭕", callback_data=f"ttt_join_{game_id}")
         b.button(text="🚪 Скасувати", callback_data=f"ttt_cancel_{game_id}")
         b.adjust(1,1)
-        txt=f"""<b>🎮 Хрестики-Нолики #{game_id}</b> ✨
+        board_str = render_board(board)
+        txt = f"<b>🎮 Гра #{game_id} створена!</b> ✨\n\n❌ Гравець 1: {escape(p1_name)}\n⭕ Очікуємо гравця 2...\n\n{board_str}\n\nНатисни «Приєднатись» щоб грати!"
 
-Гравець 1 (❌): {escape(call.from_user.first_name)}
-
-Очікуємо гравця 2 (⭕)...
-Натисни «Приєднатись»!
-
-{render_board(board)}
-"""
         try:
             msg=await call.message.answer(txt, reply_markup=b.as_markup())
             _games[game_id]["message_id"]=msg.message_id
@@ -381,19 +377,18 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
         if call.from_user.id in game["players"]: return await call.answer("Ти вже в грі!", show_alert=True)
         if len(game["players"])>=2: return await call.answer("Місця зайняті (макс 2)", show_alert=True)
         
+        p2_name = call.from_user.first_name or "Гравець 2"
+        if p2_name.strip() in ["", "-"]: p2_name = f"Гравець {call.from_user.id%1000}"
         game["players"].append(call.from_user.id)
-        game["player_names"].append(call.from_user.first_name)
+        game["player_names"].append(p2_name)
         game["status"]="playing"
+
         
-        # Анімація старту
-        txt=f"""<b>🎮 Гра #{game_id} почалась!</b> ✨
+        board_str = render_board(game["board"])
+        p1 = escape(game["player_names"][0])
+        p2 = escape(game["player_names"][1])
+        txt = f"<b>🎮 Гра #{game_id} почалась! ✨</b>\n\n❌ {p1} vs ⭕ {p2}\n\nХід: ❌ {p1} — твій хід!\n\n{board_str}"
 
-❌ {escape(game['player_names'][0])} vs ⭕ {escape(game['player_names'][1])}
-
-Хід: ❌ {escape(game['player_names'][0])}
-
-{render_board(game['board'])}
-"""
         try:
             await bot.edit_message_text(chat_id=game["chat_id"], message_id=game["message_id"], text=txt, reply_markup=kb_tictactoe(game_id, game["board"]))
             await call.answer(f"Ти приєднався як ⭕! Твій хід після {game['player_names'][0]}")
@@ -457,14 +452,13 @@ async def cb_handler(call: CallbackQuery, bot: Bot):
             return
         else:
             next_idx = game["turn"] % 2
-            txt=f"""<b>🎮 Гра #{game_id}</b> ✨
+            board_str = render_board(game["board"])
+            p1 = escape(game["player_names"][0])
+            p2 = escape(game["player_names"][1])
+            next_emoji = "❌" if next_idx==0 else "⭕"
+            next_name = escape(game["player_names"][next_idx])
+            txt = f"<b>🎮 Гра #{game_id}</b> ✨\n\n❌ {p1} vs ⭕ {p2}\n\nХід: {next_emoji} {next_name}\n\n{board_str}"
 
-❌ {escape(game['player_names'][0])} vs ⭕ {escape(game['player_names'][1])}
-
-Хід: {'❌' if next_idx==0 else '⭕'} {escape(game['player_names'][next_idx])}
-
-{render_board(game['board'])}
-"""
             try:
                 await bot.edit_message_text(chat_id=game["chat_id"], message_id=game["message_id"], text=txt, reply_markup=kb_tictactoe(game_id, game["board"]))
                 await call.answer(f"Ти поставив {'❌' if symbol=='X' else '⭕'}! Хід суперника")
